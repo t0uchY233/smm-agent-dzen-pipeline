@@ -16,8 +16,6 @@ import re
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 import zipfile
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -30,17 +28,33 @@ ROOT = Path(__file__).resolve().parents[1]
 CARD_SIZE = (1920, 1080)
 MIN_VISUAL_DURATION_SEC = 5.0
 VISUAL_TIMELINE_GAP_SEC = 0.1
-ASSEMBLYAI_BASE_URL = "https://api.assemblyai.com"
+WHISPER_MODEL_SIZE = "large-v3"
 XML_NS = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
     "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
     "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
     "rel": "http://schemas.openxmlformats.org/package/2006/relationships",
 }
+FFMPEG_BINARY = os.environ.get("FFMPEG_BINARY", "ffmpeg")
+FFPROBE_BINARY = os.environ.get("FFPROBE_BINARY", "ffprobe")
+FFPROBE_PYTHON_SHIM = os.environ.get("FFPROBE_PYTHON_SHIM")
+
+
+def ffprobe_command():
+    if FFPROBE_PYTHON_SHIM:
+        return [sys.executable, FFPROBE_PYTHON_SHIM]
+    return [FFPROBE_BINARY]
 
 
 class RenderVisualsError(RuntimeError):
     pass
+
+
+def _configure_utf8_stdio():
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name)
+        if stream and hasattr(stream, "buffer") and (stream.encoding or "").lower() not in {"utf-8", "utf8"}:
+            setattr(sys, name, io.TextIOWrapper(stream.buffer, encoding="utf-8"))
 
 
 def parse_env(path=ROOT / ".env"):
@@ -54,11 +68,6 @@ def parse_env(path=ROOT / ".env"):
         key, value = line.split("=", 1)
         values[key.strip()] = value.strip().strip('"').strip("'")
     return values
-
-
-def is_missing_api_key(value):
-    value = (value or "").strip()
-    return not value or value in {"your_assemblyai_api_key_here", "your_api_key_here", "YOUR_API_KEY"}
 
 
 def normalize_text(text):
@@ -96,7 +105,14 @@ def find_matching_docx(video_path, teleprompter_dir=ROOT / ".tmp" / "teleprompte
 
 def read_docx_via_tool(docx_path):
     cmd = [sys.executable, str(ROOT / "tools" / "read_docx.py"), str(docx_path)]
-    proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True)
+    proc = subprocess.run(
+        cmd,
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+    )
     if proc.returncode != 0:
         raise RenderVisualsError(proc.stderr.strip() or "read_docx.py failed")
     return json.loads(proc.stdout)
@@ -225,16 +241,15 @@ def render_docx_image_card(visual, output_dir, video_title=None):
     output_dir.mkdir(parents=True, exist_ok=True)
     output = output_dir / f"{visual['id']}.png"
 
-    image = Image.new("RGB", CARD_SIZE, "#f7f7f2")
+    image = Image.new("RGB", CARD_SIZE, "#ffffff")
     draw = ImageDraw.Draw(image)
     small_font = find_font(bold=True, size=28)
 
-    accent = "#2858a3"
-    draw.rectangle((0, 0, 1920, 26), fill=accent)
-    draw.rounded_rectangle((105, 76, 1815, 984), radius=22, fill="#ffffff", outline="#dfdfd8", width=3)
-    draw.text((140, 106), "VISUAL", fill=accent, font=small_font)
-
     with Image.open(visual["source_image_path"]) as source:
+        # Composite transparent diagram backgrounds onto the white canvas.
+        rgba = source.convert("RGBA")
+        source = Image.new("RGBA", rgba.size, "#ffffff")
+        source.alpha_composite(rgba)
         source = source.convert("RGB")
         source.thumbnail((1640, 680), Image.LANCZOS)
         x = 140 + (1640 - source.width) // 2
@@ -395,7 +410,7 @@ def render_slide_card(slide, output_dir):
     output_dir.mkdir(parents=True, exist_ok=True)
     output = output_dir / f"{slide['id']}.png"
 
-    image = Image.new("RGB", CARD_SIZE, "#f7f7f2")
+    image = Image.new("RGB", CARD_SIZE, "#ffffff")
     draw = ImageDraw.Draw(image)
 
     title_font = find_font(bold=True, size=76)
@@ -403,16 +418,12 @@ def render_slide_card(slide, output_dir):
     small_font = find_font(bold=True, size=30)
 
     accent = {
-        "problem": "#c43d2f",
-        "principle": "#1f6f5b",
-        "metric": "#2858a3",
-        "process": "#8a5a1f",
-        "result": "#5a3f91",
-    }.get(slide.get("kind"), "#2858a3")
-
-    draw.rectangle((0, 0, 1920, 26), fill=accent)
-    draw.rounded_rectangle((105, 96, 1815, 984), radius=22, fill="#ffffff", outline="#dfdfd8", width=3)
-    draw.text((140, 126), slide.get("kind", "visual").upper(), fill=accent, font=small_font)
+        "problem": "#efd0c9",
+        "principle": "#cde5da",
+        "metric": "#cddff2",
+        "process": "#f1e0bd",
+        "result": "#dfd5ee",
+    }.get(slide.get("kind"), "#cddff2")
 
     y = 190
     for line in wrap_text(draw, slide["title"], title_font, 1500)[:3]:
@@ -435,68 +446,118 @@ def render_slide_card(slide, output_dir):
     return output
 
 
-def http_json(method, url, api_key, payload=None, timeout=120):
-    data = None
-    headers = {"Authorization": api_key}
-    if payload is not None:
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+def transcribe_with_whisper(audio_path, language="ru", device="auto", compute_type=None):
+    """Transcribe locally with Whisper large-v3 and return word timestamps in milliseconds."""
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise RenderVisualsError(f"AssemblyAI HTTP {exc.code}: {body[:500]}") from exc
+        import ctranslate2
+        from faster_whisper import WhisperModel
+    except ImportError as exc:
+        raise RenderVisualsError(
+            "Local Whisper dependencies are missing; run through render-docx-visuals or install faster-whisper"
+        ) from exc
 
+    requested_device = (device or "auto").strip().lower()
+    if requested_device not in {"auto", "cpu", "cuda"}:
+        raise RenderVisualsError(f"Unsupported Whisper device: {requested_device}")
 
-def upload_to_assemblyai(audio_path, api_key, base_url=ASSEMBLYAI_BASE_URL):
-    req = urllib.request.Request(
-        f"{base_url}/v2/upload",
-        data=Path(audio_path).read_bytes(),
-        headers={
-            "Authorization": api_key,
-            "Content-Type": "application/octet-stream",
-        },
-        method="POST",
-    )
+    selected_device = requested_device
+    if selected_device == "auto":
+        selected_device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+    selected_compute_type = compute_type or ("int8_float16" if selected_device == "cuda" else "int8")
+
+    def run_model(active_device, active_compute_type):
+        print(
+            f"Local Whisper {WHISPER_MODEL_SIZE}: device={active_device}, compute_type={active_compute_type}",
+            file=sys.stderr,
+            flush=True,
+        )
+        model = WhisperModel(
+            WHISPER_MODEL_SIZE,
+            device=active_device,
+            compute_type=active_compute_type,
+        )
+        segments, info = model.transcribe(
+            str(audio_path),
+            language=language or None,
+            beam_size=5,
+            word_timestamps=True,
+            vad_filter=True,
+            condition_on_previous_text=True,
+        )
+        return segments, info
+
     try:
-        with urllib.request.urlopen(req, timeout=300) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise RenderVisualsError(f"AssemblyAI upload HTTP {exc.code}: {body[:500]}") from exc
-    return result["upload_url"]
+        segments, info = run_model(selected_device, selected_compute_type)
+        words = []
+        segment_texts = []
+        last_progress = time.monotonic()
+        for segment in segments:
+            text = (segment.text or "").strip()
+            if text:
+                segment_texts.append(text)
+            for word in segment.words or []:
+                token = (word.word or "").strip()
+                if not token:
+                    continue
+                words.append(
+                    {
+                        "text": token,
+                        "start": round(float(word.start or 0) * 1000),
+                        "end": round(float(word.end or 0) * 1000),
+                        "confidence": round(float(word.probability or 0), 4),
+                    }
+                )
+            if time.monotonic() - last_progress >= 30:
+                print(
+                    f"Whisper processed {float(segment.end or 0):.0f} sec of audio",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                last_progress = time.monotonic()
+    except RuntimeError as exc:
+        if selected_device != "cuda":
+            raise RenderVisualsError(f"Local Whisper transcription failed: {exc}") from exc
+        print(
+            "Whisper CUDA mode failed; retrying on CPU with int8",
+            file=sys.stderr,
+            flush=True,
+        )
+        try:
+            segments, info = run_model("cpu", "int8")
+            words = []
+            segment_texts = []
+            for segment in segments:
+                text = (segment.text or "").strip()
+                if text:
+                    segment_texts.append(text)
+                for word in segment.words or []:
+                    token = (word.word or "").strip()
+                    if token:
+                        words.append(
+                            {
+                                "text": token,
+                                "start": round(float(word.start or 0) * 1000),
+                                "end": round(float(word.end or 0) * 1000),
+                                "confidence": round(float(word.probability or 0), 4),
+                            }
+                        )
+        except RuntimeError as cpu_exc:
+            raise RenderVisualsError(f"Local Whisper transcription failed: {cpu_exc}") from cpu_exc
+
+    text = " ".join(segment_texts).strip()
+    if not text or not words:
+        raise RenderVisualsError("Local Whisper returned an empty transcript")
+    return {
+        "status": "completed",
+        "engine": "faster-whisper",
+        "model": WHISPER_MODEL_SIZE,
+        "language": getattr(info, "language", language),
+        "text": text,
+        "words": words,
+    }
 
 
-def transcribe_with_assemblyai(audio_path, api_key, language_code="ru", base_url=ASSEMBLYAI_BASE_URL, poll_seconds=5, timeout_seconds=1800):
-    upload_url = upload_to_assemblyai(audio_path, api_key, base_url)
-    transcript = http_json(
-        "POST",
-        f"{base_url}/v2/transcript",
-        api_key,
-        {
-            "audio_url": upload_url,
-            "language_code": language_code,
-            "speech_models": ["universal-3-pro", "universal-2"],
-            "punctuate": True,
-            "format_text": True,
-        },
-    )
-    transcript_id = transcript["id"]
-    deadline = time.time() + timeout_seconds
-    while time.time() < deadline:
-        result = http_json("GET", f"{base_url}/v2/transcript/{transcript_id}", api_key)
-        status = result.get("status")
-        if status == "completed":
-            return result
-        if status == "error":
-            raise RenderVisualsError(result.get("error") or "AssemblyAI transcription failed")
-        time.sleep(poll_seconds)
-    raise RenderVisualsError("AssemblyAI transcription timeout")
-
-
-def find_anchor_in_words(anchor, words, min_score=0.68, start_index=0):
+def find_anchor_in_words(anchor, words, min_score=0.55, start_index=0):
     anchor_tokens = tokenize(anchor)
     if not anchor_tokens or not words:
         return None, 0.0, start_index
@@ -535,7 +596,7 @@ def extend_timeline_until_next(timeline, video_duration, min_duration=MIN_VISUAL
         if index + 1 < len(ordered):
             end_sec = round(float(ordered[index + 1]["start_sec"]) - VISUAL_TIMELINE_GAP_SEC, 2)
         else:
-            end_sec = min(float(video_duration), float(updated["start_sec"]) + float(last_duration))
+            end_sec = float(video_duration)
         if end_sec - float(updated["start_sec"]) >= min_duration:
             updated["end_sec"] = round(end_sec, 2)
             extended.append(updated)
@@ -602,7 +663,13 @@ def build_timeline(slides, transcript, body_text, video_duration, duration_mode=
 
 
 def run_checked(cmd, capture=True):
-    proc = subprocess.run(cmd, text=True, capture_output=capture)
+    proc = subprocess.run(
+        cmd,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=capture,
+    )
     if proc.returncode != 0:
         if capture:
             raise RenderVisualsError(proc.stderr.strip() or f"Command failed: {' '.join(cmd)}")
@@ -613,7 +680,7 @@ def run_checked(cmd, capture=True):
 def ffprobe_duration(video_path):
     out = run_checked(
         [
-            "ffprobe",
+            *ffprobe_command(),
             "-v",
             "error",
             "-show_entries",
@@ -626,10 +693,54 @@ def ffprobe_duration(video_path):
     return float(out.strip())
 
 
+def ffprobe_decodable_duration(video_path):
+    """Return the end of the last readable media packet.
+
+    Interrupted camera recordings can retain a declared MP4 duration that is
+    longer than the media actually written to disk. Using that value creates a
+    frozen, silent tail in the render, so materially shorter packet data wins.
+    """
+    declared_duration = ffprobe_duration(video_path)
+    proc = subprocess.run(
+        [
+            *ffprobe_command(),
+            "-v",
+            "error",
+            "-show_entries",
+            "packet=pts_time,duration_time",
+            "-of",
+            "csv=p=0",
+            str(video_path),
+        ],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+    )
+    packet_end = 0.0
+    for line in proc.stdout.splitlines():
+        fields = line.strip().split(",")
+        try:
+            pts = float(fields[0])
+            packet_duration = float(fields[1]) if len(fields) > 1 and fields[1] else 0.0
+        except (ValueError, IndexError):
+            continue
+        packet_end = max(packet_end, pts + packet_duration)
+
+    if packet_end > 0.0 and declared_duration - packet_end > 1.0:
+        print(
+            f"Declared duration {declared_duration:.3f}s exceeds readable media "
+            f"{packet_end:.3f}s; trimming the damaged tail.",
+            file=sys.stderr,
+        )
+        return packet_end
+    return declared_duration
+
+
 def extract_audio(video_path, audio_path):
     run_checked(
         [
-            "ffmpeg",
+            FFMPEG_BINARY,
             "-nostdin",
             "-y",
             "-hide_banner",
@@ -664,7 +775,7 @@ def render_video(raw_video, timeline, output_path, continuous_visuals=False):
     raw_video = Path(raw_video)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    duration = ffprobe_duration(raw_video)
+    duration = ffprobe_decodable_duration(raw_video)
 
     if not continuous_visuals:
         return render_segmented_video(raw_video, timeline, duration, output_path)
@@ -716,7 +827,7 @@ def render_segmented_video(raw_video, timeline, duration, output_path):
     )
     run_checked(
         [
-            "ffmpeg",
+            FFMPEG_BINARY,
             "-nostdin",
             "-y",
             "-hide_banner",
@@ -765,7 +876,7 @@ def render_continuous_visual_block(raw_video, timeline, duration, output_path):
     )
     run_checked(
         [
-            "ffmpeg",
+            FFMPEG_BINARY,
             "-nostdin",
             "-y",
             "-hide_banner",
@@ -793,7 +904,7 @@ def render_visual_block_segment(raw_video, timeline, start_sec, duration_sec, ou
         return
 
     cmd = [
-        "ffmpeg",
+        FFMPEG_BINARY,
         "-nostdin",
         "-y",
         "-hide_banner",
@@ -801,8 +912,6 @@ def render_visual_block_segment(raw_video, timeline, start_sec, duration_sec, ou
         "error",
         "-ss",
         f"{start_sec:.3f}",
-        "-t",
-        f"{duration_sec:.3f}",
         "-i",
         str(raw_video),
     ]
@@ -850,6 +959,8 @@ def render_visual_block_segment(raw_video, timeline, start_sec, duration_sec, ou
             "aac",
             "-t",
             f"{duration_sec:.3f}",
+            "-video_track_timescale",
+            "15360",
             str(output_path),
         ]
     )
@@ -860,7 +971,7 @@ def render_video_with_enabled_overlays(raw_video, timeline, output_path):
     raw_video = Path(raw_video)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    duration = ffprobe_duration(raw_video)
+    duration = ffprobe_decodable_duration(raw_video)
 
     valid_items = []
     for item in sorted(timeline, key=lambda row: row["start_sec"]):
@@ -870,7 +981,7 @@ def render_video_with_enabled_overlays(raw_video, timeline, output_path):
             valid_items.append({**item, "start_sec": start, "end_sec": end})
 
     cmd = [
-        "ffmpeg",
+        FFMPEG_BINARY,
         "-nostdin",
         "-y",
         "-hide_banner",
@@ -937,7 +1048,7 @@ def render_video_with_enabled_overlays(raw_video, timeline, output_path):
 def render_plain_segment(raw_video, start_sec, duration_sec, output_path):
     run_checked(
         [
-            "ffmpeg",
+            FFMPEG_BINARY,
             "-nostdin",
             "-y",
             "-hide_banner",
@@ -945,8 +1056,6 @@ def render_plain_segment(raw_video, start_sec, duration_sec, output_path):
             "error",
             "-ss",
             f"{start_sec:.3f}",
-            "-t",
-            f"{duration_sec:.3f}",
             "-i",
             str(raw_video),
             "-map",
@@ -965,6 +1074,10 @@ def render_plain_segment(raw_video, start_sec, duration_sec, output_path):
             "yuv420p",
             "-c:a",
             "aac",
+            "-t",
+            f"{duration_sec:.3f}",
+            "-video_track_timescale",
+            "15360",
             str(output_path),
         ],
         capture=False,
@@ -978,7 +1091,7 @@ def escape_concat_path(path):
 def render_card_segment(raw_video, image_path, start_sec, duration_sec, output_path):
     run_checked(
         [
-            "ffmpeg",
+            FFMPEG_BINARY,
             "-nostdin",
             "-y",
             "-hide_banner",
@@ -986,8 +1099,6 @@ def render_card_segment(raw_video, image_path, start_sec, duration_sec, output_p
             "error",
             "-ss",
             f"{start_sec:.3f}",
-            "-t",
-            f"{duration_sec:.3f}",
             "-i",
             str(raw_video),
             "-loop",
@@ -1012,6 +1123,10 @@ def render_card_segment(raw_video, image_path, start_sec, duration_sec, output_p
             "yuv420p",
             "-c:a",
             "aac",
+            "-t",
+            f"{duration_sec:.3f}",
+            "-video_track_timescale",
+            "15360",
             "-shortest",
             str(output_path),
         ],
@@ -1095,16 +1210,13 @@ def run_pipeline(
     else:
         work_dir.mkdir(parents=True, exist_ok=True)
         env = {**parse_env(), **os.environ}
-        api_key = env.get("ASSEMBLYAI_API_KEY")
-        if is_missing_api_key(api_key):
-            raise RenderVisualsError("ASSEMBLYAI_API_KEY is missing in .env or environment")
         audio_path = work_dir / "audio.mp3"
         extract_audio(raw_video, audio_path)
-        transcript = transcribe_with_assemblyai(
+        transcript = transcribe_with_whisper(
             audio_path,
-            api_key,
-            language_code=env.get("ASSEMBLYAI_LANGUAGE_CODE", "ru"),
-            base_url=env.get("ASSEMBLYAI_BASE_URL", ASSEMBLYAI_BASE_URL),
+            language=env.get("WHISPER_LANGUAGE", "ru"),
+            device=env.get("WHISPER_DEVICE", "auto"),
+            compute_type=env.get("WHISPER_COMPUTE_TYPE") or None,
         )
         transcript_path = work_dir / "transcript.json"
         write_json(transcript_path, transcript)
@@ -1127,11 +1239,12 @@ def run_pipeline(
     write_json(slide_plan_path, slide_plan)
 
     if dry_run:
+        duration = ffprobe_duration(raw_video)
         timeline = build_timeline(
             slide_plan["slides"],
             transcript or {"words": []},
             docx_data.get("body_text", ""),
-            video_duration=600,
+            video_duration=duration,
             duration_mode=visual_duration_mode,
         )
         timeline_path = work_dir / "timeline.json"
@@ -1145,19 +1258,16 @@ def run_pipeline(
             "fallback_matches": sum(1 for item in timeline if item["match_method"] == "fallback"),
         }
 
-    duration = ffprobe_duration(raw_video)
+    duration = ffprobe_decodable_duration(raw_video)
     if transcript is None:
         audio_path = work_dir / "audio.mp3"
         extract_audio(raw_video, audio_path)
         env = {**parse_env(), **os.environ}
-        api_key = env.get("ASSEMBLYAI_API_KEY")
-        if is_missing_api_key(api_key):
-            raise RenderVisualsError("ASSEMBLYAI_API_KEY is missing in .env or environment")
-        transcript = transcribe_with_assemblyai(
+        transcript = transcribe_with_whisper(
             audio_path,
-            api_key,
-            language_code=env.get("ASSEMBLYAI_LANGUAGE_CODE", "ru"),
-            base_url=env.get("ASSEMBLYAI_BASE_URL", ASSEMBLYAI_BASE_URL),
+            language=env.get("WHISPER_LANGUAGE", "ru"),
+            device=env.get("WHISPER_DEVICE", "auto"),
+            compute_type=env.get("WHISPER_COMPUTE_TYPE") or None,
         )
         transcript_path = work_dir / "transcript.json"
         write_json(transcript_path, transcript)
@@ -1192,6 +1302,7 @@ def run_pipeline(
 
 
 def main():
+    _configure_utf8_stdio()
     parser = argparse.ArgumentParser(description="Render visual cards over a raw talking-head video")
     parser.add_argument("raw_mp4", help="Path to raw MP4")
     parser.add_argument("--docx", help="Path to matching DOCX script")
@@ -1209,7 +1320,7 @@ def main():
         help="Use fixed visual duration or keep each visual until the next visual starts",
     )
     parser.add_argument("--docx-json", help=argparse.SUPPRESS)
-    parser.add_argument("--transcript-json", help="Use existing AssemblyAI transcript JSON instead of calling ASR")
+    parser.add_argument("--transcript-json", help="Use an existing word-timestamp transcript JSON")
     args = parser.parse_args()
 
     try:

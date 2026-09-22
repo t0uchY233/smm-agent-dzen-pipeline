@@ -1,0 +1,55 @@
+# Screenshots (debug artifacts)
+*.png
+*.jpg
+
+# Временные файлы
+*.tmp
+nul
+0)
+0}
+1
+10
+10)
+2
+2)
+40
+60
+
+# Chrome profile (содержит куки и сессии — не коммитить!)
+chrome-cdp-profile/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+node_modules/
+package-lock.json
+
+# Старые версии скрипта (итерации)
+publish_v1.py
+publish_v2.py
+publish_v3.py
+publish_v4.py
+publish_v5.py
+publish_v6.py
+publish_v7.py
+publish_clipboard.py
+publish_final.py
+publish_now.py
+fill_*.py
+cdp_fill.py
+inspect_page.py
+start_chrome_cdp.bat
+
+# HTML дампы
+*.html
+
+# Прочий мусор из итераций
+a.href*
+b.text*
+b.y
+h
+t
+console.*

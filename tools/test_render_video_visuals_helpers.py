@@ -1,25 +1,11 @@
-import json
 import subprocess
-import urllib.error
+import sys
+import types
 
 import pytest
 from PIL import Image
 
 from tools import render_video_visuals as rv
-
-
-class FakeResponse:
-    def __init__(self, payload):
-        self.payload = payload
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-    def read(self):
-        return json.dumps(self.payload).encode("utf-8")
 
 
 def _make_raw_video(path, duration="1.2"):
@@ -79,7 +65,7 @@ def test_parse_env_strips_quotes_and_ignores_comments(tmp_path):
 
 
 def test_read_docx_via_tool_raises_render_error_on_subprocess_failure(monkeypatch):
-    def fake_run(cmd, cwd, text, capture_output):
+    def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="bad docx")
 
     monkeypatch.setattr(rv.subprocess, "run", fake_run)
@@ -88,75 +74,38 @@ def test_read_docx_via_tool_raises_render_error_on_subprocess_failure(monkeypatc
         rv.read_docx_via_tool("missing.docx")
 
 
-def test_http_json_sends_payload_and_parses_response(monkeypatch):
-    captured = {}
-
-    def fake_urlopen(req, timeout):
-        captured["method"] = req.get_method()
-        captured["url"] = req.full_url
-        captured["headers"] = dict(req.header_items())
-        captured["data"] = json.loads(req.data.decode("utf-8"))
-        captured["timeout"] = timeout
-        return FakeResponse({"ok": True})
-
-    monkeypatch.setattr(rv.urllib.request, "urlopen", fake_urlopen)
-
-    result = rv.http_json("POST", "https://api.example.test", "api-key", {"x": "тест"}, timeout=9)
-
-    assert result == {"ok": True}
-    assert captured["method"] == "POST"
-    assert captured["headers"]["Authorization"] == "api-key"
-    assert captured["headers"]["Content-type"] == "application/json"
-    assert captured["data"] == {"x": "тест"}
-    assert captured["timeout"] == 9
-
-
-def test_http_json_wraps_http_error_body(monkeypatch):
-    class ErrorBody:
-        def read(self):
-            return b"failure detail"
-
-        def close(self):
-            return None
-
-    def fake_urlopen(req, timeout):
-        raise urllib.error.HTTPError(
-            req.full_url,
-            500,
-            "server error",
-            hdrs={},
-            fp=ErrorBody(),
-        )
-
-    monkeypatch.setattr(rv.urllib.request, "urlopen", fake_urlopen)
-
-    with pytest.raises(rv.RenderVisualsError, match="AssemblyAI HTTP 500: failure detail"):
-        rv.http_json("GET", "https://api.example.test", "api-key")
-
-
-def test_upload_to_assemblyai_posts_audio_bytes(monkeypatch, tmp_path):
+def test_transcribe_with_whisper_returns_ms_word_timestamps_and_retries_cpu(monkeypatch, tmp_path):
     audio_path = tmp_path / "audio.mp3"
     audio_path.write_bytes(b"audio")
-    captured = {}
+    model_calls = []
 
-    def fake_urlopen(req, timeout):
-        captured["url"] = req.full_url
-        captured["method"] = req.get_method()
-        captured["headers"] = dict(req.header_items())
-        captured["data"] = req.data
-        captured["timeout"] = timeout
-        return FakeResponse({"upload_url": "https://cdn.example/audio"})
+    class FakeWhisperModel:
+        def __init__(self, model_size, device, compute_type):
+            model_calls.append((model_size, device, compute_type))
+            if device == "cuda":
+                raise RuntimeError("GPU memory unavailable")
 
-    monkeypatch.setattr(rv.urllib.request, "urlopen", fake_urlopen)
+        def transcribe(self, path, **kwargs):
+            assert path == str(audio_path)
+            assert kwargs["language"] == "ru"
+            assert kwargs["word_timestamps"] is True
+            word = types.SimpleNamespace(word=" готово", start=1.25, end=1.75, probability=0.98)
+            segment = types.SimpleNamespace(text="Готово.", start=1.0, end=2.0, words=[word])
+            return iter([segment]), types.SimpleNamespace(language="ru")
 
-    upload_url = rv.upload_to_assemblyai(audio_path, "api-key", base_url="https://assembly.example")
+    faster_whisper = types.ModuleType("faster_whisper")
+    faster_whisper.WhisperModel = FakeWhisperModel
+    ctranslate2 = types.ModuleType("ctranslate2")
+    ctranslate2.get_cuda_device_count = lambda: 1
+    monkeypatch.setitem(sys.modules, "faster_whisper", faster_whisper)
+    monkeypatch.setitem(sys.modules, "ctranslate2", ctranslate2)
 
-    assert upload_url == "https://cdn.example/audio"
-    assert captured["url"] == "https://assembly.example/v2/upload"
-    assert captured["method"] == "POST"
-    assert captured["headers"]["Authorization"] == "api-key"
-    assert captured["data"] == b"audio"
-    assert captured["timeout"] == 300
+    result = rv.transcribe_with_whisper(audio_path, language="ru", device="auto")
+
+    assert model_calls == [("large-v3", "cuda", "int8_float16"), ("large-v3", "cpu", "int8")]
+    assert result["model"] == "large-v3"
+    assert result["text"] == "Готово."
+    assert result["words"] == [{"text": "готово", "start": 1250, "end": 1750, "confidence": 0.98}]
 
 
 def test_extract_audio_writes_mono_mp3_for_asr(tmp_path):
@@ -187,50 +136,3 @@ def test_render_video_with_enabled_overlays_creates_output_mp4(tmp_path):
     assert output.stat().st_size > 0
 
 
-def test_transcribe_with_assemblyai_polls_until_completed(monkeypatch, tmp_path):
-    calls = []
-
-    monkeypatch.setattr(rv, "upload_to_assemblyai", lambda audio_path, api_key, base_url: "https://cdn.example/audio")
-
-    def fake_http_json(method, url, api_key, payload=None):
-        calls.append((method, url, payload))
-        if method == "POST":
-            return {"id": "tr-1"}
-        return {"status": "completed", "text": "готово", "words": []}
-
-    monkeypatch.setattr(rv, "http_json", fake_http_json)
-
-    result = rv.transcribe_with_assemblyai(
-        tmp_path / "audio.mp3",
-        "api-key",
-        language_code="ru",
-        base_url="https://assembly.example",
-        poll_seconds=0,
-        timeout_seconds=5,
-    )
-
-    assert result["text"] == "готово"
-    assert calls[0] == (
-        "POST",
-        "https://assembly.example/v2/transcript",
-        {
-            "audio_url": "https://cdn.example/audio",
-            "language_code": "ru",
-            "speech_models": ["universal-3-pro", "universal-2"],
-            "punctuate": True,
-            "format_text": True,
-        },
-    )
-    assert calls[1] == ("GET", "https://assembly.example/v2/transcript/tr-1", None)
-
-
-def test_transcribe_with_assemblyai_raises_on_error_status(monkeypatch, tmp_path):
-    monkeypatch.setattr(rv, "upload_to_assemblyai", lambda audio_path, api_key, base_url: "https://cdn.example/audio")
-    monkeypatch.setattr(
-        rv,
-        "http_json",
-        lambda method, url, api_key, payload=None: {"id": "tr-1"} if method == "POST" else {"status": "error", "error": "bad audio"},
-    )
-
-    with pytest.raises(rv.RenderVisualsError, match="bad audio"):
-        rv.transcribe_with_assemblyai(tmp_path / "audio.mp3", "api-key", poll_seconds=0, timeout_seconds=5)

@@ -1,6 +1,20 @@
-# Publish Log
+# YouTube — журнал подтверждённых действий
 
-| Scheduled at | YouTube URL | Status | TG msg_id | Blog URL |
-|--------------|-------------|--------|-----------|----------|
-| 2026-04-15 | https://www.youtube.com/watch?v=tUHdbZCmcgU | published | 412 | https://veselkov.me/in/upravlenie/zapasy-bufer-potoka-pribyl.html |
-| 2026-04-15 | https://www.youtube.com/watch?v=9CzkPcBnMXY | tg-failed | — | https://veselkov.me/in/upravlenie/investicii-vne-butylochnogo-gorlyshka.html |
+Новые записи отражают результат прямой загрузки на YouTube: время действия, файл, URL, видимость, план публикации в МСК и состояние обработки.
+
+Старые записи сохранены в [архиве](archive/retired-2026-09-08/publish-log.md). Проверять их вместе с локальным состоянием и URL из разговора перед новой загрузкой, чтобы избежать дубликатов.
+
+Новых подтверждённых загрузок после изменения процесса пока нет.
+
+- 2026-09-22T06:56:40.643499+00:00 | Проверка существующего выпуска, без загрузки и изменений | https://youtu.be/L5BeaFIFpZQ | канал UCPL3MascatiZkkBwruDgPYA | scheduled: 2026-09-24 14:00 МСК | до срока доступ ограничен | SD/HD обработаны | доказательство: .tmp/publishing/2026-09-24-1400-9 промптов для экономики предприятия и дашбордов/youtube-browser-observation.txt
+
+- 2026-09-22T10:44:28+03:00 | Тестовая публикация в Дзен | https://dzen.ru/a/arIxq5737FEgoCwZ | канал «Экономика не для всех!» | опубликовано сразу | заголовок и текст открыты на публичной странице | материал: .tmp/dzen-test-publication.txt
+- 2026-09-22T11:45:32+03:00 | Тестовая публикация в Дзен с одним изображением | https://dzen.ru/a/arI7OeA6LwI6YOfA | канал «Экономика не для всех!» | опубликовано сразу | заголовок, текст и изображение проверены на публичной странице | доказательство: .tmp/dzen-test-publication-image-verification.json
+
+- 2026-09-22T10:04:29.953982+00:00 | fdb342c551448b530f40 | dzen | failed
+
+- 2026-09-22T13:18:46.165084+00:00 | fdb342c551448b530f40 | dzen | failed
+
+- 2026-09-22T13:26:25.985901+00:00 | fdb342c551448b530f40 | dzen | failed
+
+- 2026-09-22T17:20:34+03:00 | fdb342c551448b530f40 | Дзен | scheduled | https://dzen.ru/a/arKK2yBH7lbAPr3c | 2026-09-24 14:00 МСК | 10 изображений, 5 активных ссылок | доказательство: .tmp/publishing/2026-09-24-1400-9 промптов для экономики предприятия и дашбордов/dzen-scheduled-evidence.json

@@ -314,7 +314,8 @@ def test_render_video_preserves_duration_when_plain_segments_are_between_keyfram
     assert abs(rv.ffprobe_duration(output) - rv.ffprobe_duration(raw)) < 0.25
 
 
-def test_cli_dry_run_writes_artifacts_without_assemblyai(tmp_path):
+def test_cli_dry_run_writes_artifacts_without_transcription(tmp_path, monkeypatch):
+    monkeypatch.setattr(rv, 'ffprobe_duration', lambda path: 60.0)
     raw = tmp_path / "2026-05-01-1400-test.mp4"
     raw.write_bytes(b"not a real video for dry-run")
     docx_json = tmp_path / "docx.json"
@@ -345,7 +346,8 @@ def test_cli_dry_run_writes_artifacts_without_assemblyai(tmp_path):
     assert result["output_video"] is None
 
 
-def test_dry_run_can_build_visuals_from_transcript_without_docx(tmp_path):
+def test_dry_run_can_build_visuals_from_transcript_without_docx(tmp_path, monkeypatch):
+    monkeypatch.setattr(rv, 'ffprobe_duration', lambda path: 60.0)
     raw = tmp_path / "2026-05-28 ЕРП Не спасает производство.mp4"
     raw.write_bytes(b"not a real video for dry-run")
     transcript_json = tmp_path / "transcript.json"
@@ -444,7 +446,8 @@ def test_docx_visual_plan_can_use_short_footer_title_without_changing_plan_title
     assert footer_titles == ["Миксовый сдвиг FMCG", "Миксовый сдвиг FMCG"]
 
 
-def test_dry_run_can_build_visuals_from_docx_embedded_images(tmp_path):
+def test_dry_run_can_build_visuals_from_docx_embedded_images(tmp_path, monkeypatch):
+    monkeypatch.setattr(rv, 'ffprobe_duration', lambda path: 60.0)
     raw = tmp_path / "2026-06-11 1400 erp-ne-spasaet-proizvodstvo-blog.mp4"
     raw.write_bytes(b"not a real video for dry-run")
     docx_path = build_docx_with_embedded_images(tmp_path / "visuals.docx", tmp_path)
@@ -483,15 +486,9 @@ def test_dry_run_can_build_visuals_from_docx_embedded_images(tmp_path):
     assert result["asr_matches"] == 1
 
 
-def test_placeholder_assemblyai_key_is_treated_as_missing():
-    assert rv.is_missing_api_key("")
-    assert rv.is_missing_api_key("your_assemblyai_api_key_here")
-    assert not rv.is_missing_api_key("realistic_non_placeholder_key")
-
-
 def test_render_with_visuals_contract_is_documented():
-    command = Path(".codex/commands/render-with-visuals.md")
-    skill = Path(".codex/skills/render-with-visuals/SKILL.md")
+    command = Path(".agents/commands/render-with-visuals.md")
+    skill = Path(".agents/skills/render-with-visuals/SKILL.md")
     env_example = Path(".env.example").read_text(encoding="utf-8")
     readme = Path("README.md").read_text(encoding="utf-8")
     agents = Path("AGENTS.md").read_text(encoding="utf-8")
@@ -500,19 +497,20 @@ def test_render_with_visuals_contract_is_documented():
     assert skill.exists()
     command_text = command.read_text(encoding="utf-8")
     skill_text = skill.read_text(encoding="utf-8")
-    assert "ASSEMBLYAI_API_KEY" in env_example
+    assert "WHISPER_LANGUAGE" in env_example
+    assert "large-v3" in skill_text
     assert "render-with-visuals" in readme
     assert "YYYY-MM-DD-HHMM-Русский заголовок.mp4" in readme
     assert "YYYY-MM-DD-HHMM-Русский заголовок.mp4" in command_text
     assert "YYYY-MM-DD-HHMM-Русский заголовок.mp4" in skill_text
     assert "YYYY-MM-DD-HHMM-alias.mp4" not in command_text
     assert "YYYY-MM-DD-HHMM-alias.mp4" not in skill_text
-    assert "не raw" in agents
+    assert "Загружать проверенный rendered MP4" in agents
 
 
 def test_render_docx_visuals_contract_is_documented():
-    command = Path(".codex/commands/render-docx-visuals.md")
-    skill = Path(".codex/skills/render-docx-visuals/SKILL.md")
+    command = Path(".agents/commands/render-docx-visuals.md")
+    skill = Path(".agents/skills/render-docx-visuals/SKILL.md")
 
     assert command.exists()
     assert skill.exists()
