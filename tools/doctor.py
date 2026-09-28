@@ -41,27 +41,11 @@ def local_checks():
 async def online_checks(platform=None):
     result = {}
     if platform in (None, 'youtube'):
-        try:
-            from tools.publishing_youtube import youtube_service, verify_channel
-            verify_channel(youtube_service(), os.getenv('YOUTUBE_CHANNEL_ID'))
-            result['youtube'] = {'status': 'ready'}
-        except Exception as error:
-            result['youtube'] = {'status': 'blocked', 'reason': type(error).__name__,
-                                 'next': 'auth-youtube and verify channel locally'}
+        from tools.account_preflight import run_check
+        result['youtube'] = run_check('youtube')
     if platform in (None, 'telegram'):
-        client = None
-        try:
-            from tools.publishing_telegram import telegram_client, verify_channel
-            client = telegram_client()
-            await client.connect()
-            await verify_channel(client, os.getenv('TELEGRAM_CHANNEL_ID'))
-            result['telegram'] = {'status': 'ready'}
-        except Exception as error:
-            result['telegram'] = {'status': 'blocked', 'reason': type(error).__name__,
-                                  'next': 'auth-telegram and verify posting rights locally'}
-        finally:
-            if client:
-                await client.disconnect()
+        from tools.account_preflight import run_check
+        result['telegram'] = run_check('telegram')
     if platform in (None, 'dzen'):
         from tools.dzen_preflight import run_check
         result['dzen'] = run_check()
