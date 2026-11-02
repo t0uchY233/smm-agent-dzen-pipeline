@@ -4,7 +4,7 @@
   "lane": "small",
   "lane_why": "Аддитивно: каталоги youtube-publish/ и telegram-publish/ с UPSTREAM.md и лицензиями, без изменения поведения",
   "ai": false,
-  "stage": "implement",
+  "stage": "verify",
   "approvals": {
     "design": {
       "quote": "да. Можешь больше не спрашивать меня (до критического момента)",
