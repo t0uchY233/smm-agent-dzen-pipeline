@@ -8,13 +8,17 @@ next to the paragraph that introduced it instead of bulk-uploading all media.
 from __future__ import annotations
 
 import argparse
+from hashlib import sha256
 import json
 import posixpath
-import shutil
+import sys
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.dzen_content import clean_blocks
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
@@ -56,7 +60,10 @@ def extract_blocks(archive: zipfile.ZipFile, media_dir: Path) -> list[dict[str, 
             raise ValueError(f"В DOCX не найдена image-связь {rel_id}.")
         source_name = posixpath.normpath(posixpath.join("word", target))
         if source_name not in copied:
-            destination = media_dir / Path(target).name
+            # Different package members may share a basename. Bind the output
+            # name to the full member path so neither image can overwrite another.
+            destination = media_dir / (sha256(source_name.encode('utf-8')).hexdigest()
+                                       + Path(source_name).suffix)
             destination.write_bytes(archive.read(source_name))
             copied[source_name] = destination
         blocks.append({"type": "image", "path": str(copied[source_name].resolve())})
@@ -120,21 +127,12 @@ def main() -> None:
         raise ValueError("Обязательный footer пуст.")
 
     media_dir = Path(args.media_dir).resolve()
-    if media_dir.exists():
-        shutil.rmtree(media_dir)
+    if media_dir.exists() and any(media_dir.iterdir()):
+        raise ValueError("Каталог медиа не пуст. Используйте новый каталог для новой ревизии.")
     with zipfile.ZipFile(docx) as archive:
         blocks = extract_blocks(archive, media_dir)
 
-    # The Word title is represented by the Dzen title field, not a duplicate
-    # first paragraph in the article body.
-    for index, block in enumerate(blocks):
-        if block["type"] == "text" and block["text"].strip() == args.title.strip():
-            blocks.pop(index)
-            break
-    else:
-        raise ValueError("В DOCX не найден заголовок, совпадающий с --title.")
-
-    blocks.append({"type": "text", "text": footer})
+    blocks = clean_blocks(blocks, args.title, footer)
     output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     payload = {

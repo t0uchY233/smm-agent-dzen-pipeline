@@ -69,7 +69,8 @@ def main(argv=None):
     p.add_argument('--manifest', required=True)
     p.add_argument('--directory')
     for action in ('approve', 'status', 'schedule-youtube', 'check-youtube', 'preview-youtube',
-                   'schedule-telegram', 'check-telegram', 'render-texts'):
+                   'schedule-telegram', 'check-telegram', 'render-texts',
+                   'prepare-dzen', 'schedule-dzen', 'check-dzen'):
         p = sub.add_parser(action)
         p.add_argument('--release', required=True)
         if action == 'approve':
@@ -121,6 +122,12 @@ def main(argv=None):
                         (release.directory / filename).write_text(release.text(key), encoding='utf-8')
             elif args.action == 'record-browser':
                 record_browser(release, args.platform, read_json(args.evidence))
+            elif args.action.endswith('dzen'):
+                from tools.publishing_dzen import dzen_action
+                status = asyncio.run(dzen_action(args.action, release))
+                print(json.dumps(release.state['dzen'], ensure_ascii=False))
+                if status not in ('prepared', 'scheduled', 'published'):
+                    return 2
             elif args.action == 'preview-youtube':
                 from tools.publishing_youtube import preview_youtube
                 preview_youtube(release)

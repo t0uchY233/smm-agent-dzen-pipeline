@@ -3,16 +3,15 @@
 """
 dzen-publish — автоматическая публикация статьи на Яндекс Дзен через CDP.
 
-Использование:
-    python publish_dzen.py article.txt
-    python publish_dzen.py article.txt --media image.jpg image2.png
-    python publish_dzen.py article.txt --schedule 2026-09-24T14:00
-    python publish_dzen.py                    # использует TITLE/BODY из этого файла напрямую
+Использование (из корня проекта):
+    python dzen-publish/publish_dzen.py --healthcheck
+    python dzen-publish/publish_dzen.py --release <release-dir>
+    python dzen-publish/publish_dzen.py --release <release-dir> --check
 
 Требования:
     pip install playwright
     playwright install chromium
-    Chrome запущен с: --remote-debugging-port=9222 --user-data-dir=<path> --remote-allow-origins=*
+    Chrome запущен через ensure_cdp_chrome.ps1 или tools/chrome_cdp.py (loopback CDP).
 
 Настройки:
     CHANNEL_URL — полный адрес редактора вашего канала Дзен
@@ -20,7 +19,11 @@ dzen-publish — автоматическая публикация статьи 
 """
 import argparse, asyncio, json, subprocess, tempfile, os, re, sys
 from datetime import datetime
-from playwright.async_api import async_playwright
+from pathlib import Path
+from zoneinfo import ZoneInfo
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.publishing_core import ReleaseError
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
 # ─── НАСТРОЙКИ ────────────────────────────────────────────────────────────────
 CHANNEL_URL = "https://dzen.ru/profile/editor/ekonomikadliavseh"
@@ -28,17 +31,9 @@ CDP_URL    = "http://127.0.0.1:9222"
 CDP_CONNECT_TIMEOUT_SECONDS = 15
 CDP_CONNECT_RETRIES = 2
 
-# ─── КОНТЕНТ (можно заменить чтением из файла) ────────────────────────────────
-TITLE = "Кальянный лаунж в центре Петербурга: почему хороший вечер — это не дорого и не случайно"
-
-BODY = """Есть такая петербургская привычка — долго сидеть. Не потому что нечем заняться, а потому что когда место правильное, уходить просто не хочется. Хороший разговор, тарелка, которая радует глаз ещё до первой вилки, кальян с вкусом, который угадан точно под настроение. Вот это — вечер.
-
-Только вот попасть в такое место с первого раза в Петербурге — задача со звёздочкой. Город большой, заведений много, а мест, где всё это совпадает одновременно, — на самом деле не так много, как кажется."""
-
-
 # ─── УТИЛИТЫ ─────────────────────────────────────────────────────────────────
 def log(msg):
-    print(msg, flush=True)
+    print(msg, flush=True, file=sys.stderr)
 
 
 def load_article(path):
@@ -61,6 +56,8 @@ def split_markdown_links(body):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Публикация статьи в Дзен через авторизованный Chrome CDP.")
+    parser.add_argument("--release", help="утверждённый каталог выпуска")
+    parser.add_argument("--check", action="store_true", help="независимая сверка выпуска")
     parser.add_argument("article", nargs="?", help="текстовый файл: первая строка — заголовок, остальное — тело")
     parser.add_argument("--media", nargs="+", default=[], help="локальные изображения для вставки в статью")
     parser.add_argument(
@@ -171,8 +168,12 @@ def parse_schedule(value):
         scheduled_at = datetime.fromisoformat(value)
     except ValueError as exc:
         raise ValueError("Время отложки: YYYY-MM-DDTHH:MM, например 2026-09-24T14:00.") from exc
-    scheduled_at = scheduled_at.replace(second=0, microsecond=0)
-    now = datetime.now(scheduled_at.tzinfo) if scheduled_at.tzinfo else datetime.now()
+    if scheduled_at.tzinfo is None:
+        scheduled_at = scheduled_at.replace(tzinfo=ZoneInfo("Europe/Moscow"))
+    scheduled_at = scheduled_at.astimezone(ZoneInfo("Europe/Moscow"))
+    if scheduled_at.second or scheduled_at.microsecond:
+        raise ValueError("Расписание Дзена задаётся с точностью до минуты.")
+    now = datetime.now(ZoneInfo("UTC"))
     if (scheduled_at - now).total_seconds() < 60:
         raise ValueError("До времени отложенной публикации должно оставаться не меньше минуты.")
     return scheduled_at
@@ -201,11 +202,11 @@ async def wait_for_ces(page, min_count=2, timeout_ms=15000):
     return await page.evaluate("document.querySelectorAll('[contenteditable]').length")
 
 
-async def open_new_article(page):
-    """
-    Навигируемся на страницу канала и открываем новую статью через кнопку + в хедере.
-    Возвращает URL нового черновика.
-    """
+async def open_channel(page, channel_url=None):
+    """Shared read-only navigation; no editor clicks or draft creation."""
+    target = channel_url or CHANNEL_URL
+    if page.url.rstrip('/') == target.rstrip('/'):
+        return
     # Переходим на dzen.ru если нужно
     if not page.url.startswith("https://dzen.ru"):
         log("  goto dzen.ru...")
@@ -213,35 +214,60 @@ async def open_new_article(page):
         await page.wait_for_timeout(2000)
 
     # Навигируемся на страницу канала (SPA)
-    await page.evaluate("url => { window.location.href = url; }", CHANNEL_URL)
-
-    # Ждём загрузки страницы канала
-    for _ in range(20):
-        await page.wait_for_timeout(500)
-        body_len = await page.evaluate("document.body ? document.body.innerHTML.length : 0")
-        if body_len > 5000:
-            break
+    async with page.expect_navigation(wait_until='domcontentloaded', timeout=25000):
+        await page.evaluate("url => { window.location.href = url; }", target)
     log(f"  channel page loaded, url={page.url[-50:]}")
 
-    # Кликаем кнопку «+» в хедере → появляется меню «Написать статью».
-    # Селектор устойчивее к масштабу, а координаты оставлены для старого редактора.
-    add_button = page.locator('[data-testid="add-publication-button"]:visible')
-    if await add_button.count():
-        await add_button.first.click()
-        log("  clicked add-publication button")
-    else:
-        await page.mouse.click(883, 32)   # legacy editor, CSS px
-        log("  clicked legacy add-publication position")
-    await page.wait_for_timeout(2000)
 
+
+async def open_new_article(page):
+    """
+    Навигируемся на страницу канала и открываем новую статью через кнопку + в хедере.
+    Возвращает URL нового черновика.
+    """
+    await open_channel(page)
+
+    # Закрываем только известный donation-promo, а не произвольные диалоги.
+    promo_images = page.locator('img[class*="donations-promo-banner-content"]')
+    for index in range(await promo_images.count()):
+        promo_image = promo_images.nth(index)
+        if not await promo_image.is_visible():
+            continue
+        promo = promo_image.locator(
+            'xpath=ancestor::*[not(self::body or self::html)'
+            ' and .//*[@data-testid="close-button"]][1]'
+        )
+        close_button = promo.locator('[data-testid="close-button"]')
+        await close_button.click(timeout=5000)
+        await close_button.wait_for(state="hidden", timeout=5000)
+        await promo_image.wait_for(state="hidden", timeout=5000)
+        log("  closed donation promo")
+
+    # Штатный клик ждёт окончания перехода и освобождения кнопки от оверлея.
+    add_button = page.locator('[data-testid="add-publication-button"]:visible').first
     try:
-        btn = await page.wait_for_selector("text=Написать статью", timeout=5000)
-        await btn.click()
-        log("  clicked 'Написать статью'")
-    except:
-        log("  'Написать статью' not found via text, menu may have not appeared")
+        await add_button.wait_for(state="visible", timeout=15000)
+    except PlaywrightTimeoutError as exc:
+        raise RuntimeError("Кнопка создания публикации Дзена не появилась.") from exc
+    await add_button.click(timeout=15000)
+    log("  clicked add-publication button")
 
-    await page.wait_for_timeout(3000)
+    article_button = page.get_by_text("Написать статью", exact=True)
+    try:
+        await article_button.wait_for(state="visible", timeout=5000)
+    except PlaywrightTimeoutError as exc:
+        raise RuntimeError("Меню Дзена не показало пункт «Написать статью».") from exc
+    await article_button.click(timeout=5000)
+    log("  clicked 'Написать статью'")
+
+    await page.wait_for_url(
+        re.compile(r"^https://dzen\.ru/profile/editor/[^?#]+/edit/?(?:[?#].*)?$"),
+        wait_until="domcontentloaded",
+        timeout=15000,
+    )
+    await page.locator('[contenteditable="true"]:visible').nth(1).wait_for(
+        state="visible", timeout=15000
+    )
     log(f"  editor url: {page.url}")
     return page.url
 
@@ -282,6 +308,8 @@ async def clear_article_body(page, body_editor, keep_first_image=False):
     иначе новая последовательность получила бы дубликаты медиа.
     """
     log("  clearing previous article body...")
+    if await page.locator('[data-testid="article-image-item"] img').count():
+        await focus_body_end(page, body_editor)
     await body_editor.fill("")
     await page.wait_for_timeout(500)
     if keep_first_image:
@@ -344,12 +372,46 @@ async def clear_article_body(page, body_editor, keep_first_image=False):
         raise RuntimeError(
             f"Редактор оставил {remaining} старых изображений; остановлено, чтобы не создать дубликаты."
         )
+    if await article_blocks(page, body_editor):
+        raise RuntimeError("Редактор оставил текст после очистки черновика.")
 
 
 async def focus_body_end(page, body_editor):
     """Ставит каретку в конец статьи штатными событиями клавиатуры."""
-    await body_editor.click()
+    # Clicking the contenteditable root can leave an atomic image selected;
+    # Dzen then makes the root temporarily contenteditable=false. Focus the
+    # last real paragraph so Control+End acts on the article text instead.
+    last_paragraph = body_editor.locator('[data-block="true"].zen-editor-block-paragraph').last
+    await last_paragraph.click()
     await page.keyboard.press("Control+End")
+
+
+async def article_blocks(page, body_editor):
+    """Read Draft blocks without image editor controls/captions."""
+    return await body_editor.evaluate('''root => Array.from(root.querySelectorAll('[data-block="true"]'))
+      .map(el => el.querySelector('[data-testid="article-image-item"]')
+        ? {type:'image'} : {type:'text', text:el.innerText})
+      .filter(block => block.type === 'image' || block.text.trim())''')
+
+
+async def verify_sequence_prefix(page, body_editor, expected):
+    from tools.dzen_content import plain
+    actual = await article_blocks(page, body_editor)
+    normalized = lambda blocks: [(b['type'], plain(b.get('text', ''))) for b in blocks]
+    if normalized(actual) != normalized(expected):
+        raise RuntimeError(f"Редактор изменил порядок блоков после {len(expected)} элементов; заполнение остановлено.")
+
+
+async def dismiss_editor_guide(page):
+    """Close Dzen's first-run article guide when it covers the editor."""
+    guide = page.locator('[role="dialog"]:visible').filter(has_text="Руководство")
+    if await guide.count() == 0:
+        return
+    close = guide.locator('[aria-label*="Закры"]')
+    if await close.count() != 1:
+        raise RuntimeError("Обучающее окно Дзена перекрывает редактор; кнопка закрытия не найдена.")
+    await close.click()
+    await guide.wait_for(state="hidden", timeout=5000)
 
 
 async def attach_one_media(page, image_path, body_editor, expected_count):
@@ -374,7 +436,7 @@ async def attach_one_media(page, image_path, body_editor, expected_count):
     raise RuntimeError(f"Дзен не подтвердил загрузку изображения: {image_path}")
 
 
-async def fill_article_sequence(page, title, blocks, reuse_first_image=False):
+async def fill_article_sequence(page, title, blocks, reuse_first_image=False, resume_first_text=False):
     """Заменяет статью последовательностью из DOCX, сохраняя якоря изображений.
 
     Текст добавляется только до следующего изображения, затем изображение
@@ -383,19 +445,35 @@ async def fill_article_sequence(page, title, blocks, reuse_first_image=False):
     """
     n = await wait_for_ces(page, min_count=2, timeout_ms=15000)
     log(f"  CE count: {n}")
+    await dismiss_editor_guide(page)
     body_editor = page.locator("[contenteditable]").nth(1)
-    await clear_article_body(page, body_editor, keep_first_image=reuse_first_image)
+    if resume_first_text:
+        from tools.dzen_content import plain
+        if not blocks or blocks[0]["type"] != "text" or reuse_first_image:
+            raise RuntimeError("Восстановление первого абзаца требует текстового начального блока.")
+        first_text, _ = split_markdown_links(blocks[0]["text"])
+        title_editor = page.locator("[contenteditable]").first
+        images = page.locator('[data-testid="article-image-item"] img')
+        if (plain(await body_editor.inner_text()) != plain(first_text)
+                or plain(await title_editor.inner_text())
+                or await images.count() != 0):
+            raise RuntimeError("Черновик отличается от сохранённого первого абзаца; продолжение остановлено.")
+    else:
+        await clear_article_body(page, body_editor, keep_first_image=reuse_first_image)
 
     links = []
     image_count = 0
-    started = False
+    started = resume_first_text
     before_preserved_image = reuse_first_image
     text_length = 0
-    for block in blocks:
+    completed = blocks[:1] if resume_first_text else []
+    for index, block in enumerate(blocks):
         if block["type"] == "text":
             plain_text, block_links = split_markdown_links(block["text"])
             links.extend(block_links)
             text_length += len(plain_text)
+            if resume_first_text and index == 0:
+                continue
             if before_preserved_image:
                 if not started:
                     await body_editor.click()
@@ -411,7 +489,9 @@ async def fill_article_sequence(page, title, blocks, reuse_first_image=False):
                 started = True
             else:
                 await focus_body_end(page, body_editor)
-                await page.keyboard.press("Enter")
+                last_paragraph = body_editor.locator('[data-block="true"].zen-editor-block-paragraph').last
+                if (await last_paragraph.inner_text()).strip():
+                    await page.keyboard.press("Enter")
                 await page.keyboard.insert_text(plain_text)
         else:
             if before_preserved_image:
@@ -429,8 +509,21 @@ async def fill_article_sequence(page, title, blocks, reuse_first_image=False):
                 await body_editor.fill(" ")
                 started = True
             await focus_body_end(page, body_editor)
+            last_paragraph = body_editor.locator('[data-block="true"].zen-editor-block-paragraph').last
+            if (await last_paragraph.inner_text()).strip():
+                await page.keyboard.press("Enter")
             image_count += 1
             await attach_one_media(page, block["path"], body_editor, image_count)
+
+        completed.append(block)
+        if not before_preserved_image:
+            expected = []
+            for item in completed:
+                if item['type'] == 'text':
+                    expected.append({'type': 'text', 'text': split_markdown_links(item['text'])[0]})
+                else:
+                    expected.append({'type': 'image'})
+            await verify_sequence_prefix(page, body_editor, expected)
 
     if links:
         await apply_markdown_links(page, body_editor, links)
@@ -480,9 +573,12 @@ async def fill_article_from_rich_clipboard(page, title, footer, expected_images)
         )
 
     plain_footer, footer_links = split_markdown_links(footer)
-    await focus_body_end(page, body_editor)
-    await page.keyboard.press("Enter")
-    await page.keyboard.insert_text(plain_footer)
+    from tools.dzen_content import plain
+    existing_body = plain(await body_editor.inner_text())
+    if not existing_body.endswith(plain(plain_footer)):
+        await focus_body_end(page, body_editor)
+        await page.keyboard.press("Enter")
+        await page.keyboard.insert_text(plain_footer)
     await apply_markdown_links(page, body_editor, footer_links)
 
     await page.evaluate("window.scrollTo(0, 0)")
@@ -745,9 +841,17 @@ async def enable_schedule(page, scheduled_at):
 
     date_result = await date_field.input_value()
     time_result = await time_field.input_value()
-    if str(scheduled_at.day) not in date_result or time_value not in time_result:
+    if not schedule_date_matches(date_result, scheduled_at) or time_value != time_result.strip():
         raise RuntimeError("Дзен не сохранил указанную дату или время отложки.")
     log(f"  schedule set: {date_result} {time_result}")
+
+
+def schedule_date_matches(displayed, scheduled_at):
+    russian_months = ('января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+                      'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря')
+    accepted = {scheduled_at.strftime("%d.%m.%Y"), scheduled_at.strftime("%Y-%m-%d"),
+                f"{scheduled_at.day} {russian_months[scheduled_at.month - 1]} {scheduled_at.year}"}
+    return displayed.strip() in accepted
 
 
 async def submit_publish_settings(page, scheduled_at):
@@ -755,6 +859,8 @@ async def submit_publish_settings(page, scheduled_at):
     submit = page.locator('[data-testid="publish-btn"]:visible')
     if await submit.count() == 0:
         raise RuntimeError("Не найдена кнопка подтверждения публикации в настройках Дзена.")
+    if scheduled_at:
+        parse_schedule(scheduled_at.isoformat())
     await submit.first.click()
     await page.wait_for_timeout(3000)
 
@@ -774,6 +880,8 @@ async def submit_publish_settings(page, scheduled_at):
         """, bool(scheduled_at))
         if confirm:
             log(f"  confirm dialog: {confirm}")
+            if scheduled_at:
+                parse_schedule(scheduled_at.isoformat())
             await page.mouse.click(confirm["x"], confirm["y"])
             await page.wait_for_timeout(6000)
             break
@@ -814,13 +922,13 @@ async def connect_cdp(playwright):
             return browser
         except Exception as exc:  # Playwright raises several transport-specific errors.
             last_error = exc
-            log(f"  CDP attempt {attempt} failed: {type(exc).__name__}: {exc}")
+            log(f"  CDP attempt {attempt} failed: {type(exc).__name__}")
             if attempt < CDP_CONNECT_RETRIES:
                 await asyncio.sleep(1)
 
     raise RuntimeError(
         f"Chrome CDP не ответил за {CDP_CONNECT_TIMEOUT_SECONDS} секунд "
-        f"({CDP_CONNECT_RETRIES} попытки): {last_error}"
+        f"({CDP_CONNECT_RETRIES} попытки): {type(last_error).__name__}"
     )
 
 
@@ -835,131 +943,30 @@ def select_page(context):
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 async def main():
-    global TITLE, BODY
-
     args = parse_args()
-    if args.paste_docx:
-        if args.sequence or args.media or args.reuse_first_image:
-            raise ValueError("--paste-docx нельзя сочетать с --sequence, --media или --reuse-first-image.")
-        if not args.article or not os.path.isfile(args.article):
-            raise ValueError("--paste-docx требует article-файл для заголовка.")
-        if not os.path.isfile(args.paste_docx):
-            raise FileNotFoundError(f"DOCX для rich paste не найден: {args.paste_docx}")
-        if not args.footer_file or not os.path.isfile(args.footer_file):
-            raise ValueError("--paste-docx требует существующий --footer-file.")
-        if args.expected_pasted_images < 1:
-            raise ValueError("--paste-docx требует --expected-pasted-images больше нуля.")
-    if args.reuse_first_image and not args.sequence:
-        raise ValueError("--reuse-first-image применяется только вместе с --sequence.")
-    if args.sequence and args.media:
-        raise ValueError("--sequence уже содержит изображения; не передавайте с ним --media.")
-    if args.sequence and not args.article:
-        # Последовательность — полноценный источник заголовка и текста.
-        TITLE, sequence_blocks = load_sequence(args.sequence)
-        BODY = ""
-        log(f"Loaded ordered DOCX sequence from {args.sequence}: {len(sequence_blocks)} blocks")
-    else:
-        sequence_blocks = None
-    media_paths = validate_media(args.media)
-    scheduled_at = parse_schedule(args.schedule)
-    if args.finalize_draft and (not args.draft_url or not scheduled_at):
-        raise ValueError("--finalize-draft требует --draft-url и --schedule.")
-
-    # Если передан файл — читаем из него
-    if args.article and os.path.isfile(args.article):
-        TITLE, BODY = load_article(args.article)
-        log(f"Loaded article from {args.article}")
-        log(f"Title: {TITLE[:60]}...")
-        if args.sequence:
-            sequence_title, sequence_blocks = load_sequence(args.sequence)
-            if sequence_title != TITLE:
-                raise ValueError("Заголовки article и --sequence не совпадают.")
-
-    async with async_playwright() as p:
-        browser = await connect_cdp(p)
-        context = browser.contexts[0]
-        if args.healthcheck:
-            page = select_page(context)
-            log(f"CDP HEALTHCHECK OK: page={page.url or '<blank>'}")
-            # A health check must not close the user’s authorized Chrome.
-            # Playwright disconnects when the async context exits.
-            return None
-
-        try:
-            await asyncio.wait_for(
-                context.grant_permissions(["clipboard-read", "clipboard-write"]),
-                timeout=5,
-            )
-        except Exception as exc:
-            # Clipboard is no longer needed for normal filling, so an older
-            # Chrome context failing this optional permission must not block.
-            log(f"  clipboard permissions skipped: {type(exc).__name__}: {exc}")
-        if args.draft_url:
-            pages = [page for page in context.pages if page.url.startswith(args.draft_url)]
-            page = pages[-1] if pages else await context.new_page()
-            if page.url != args.draft_url:
-                await page.goto(args.draft_url, wait_until="domcontentloaded", timeout=25000)
-            log(f"Resuming checked draft: {page.url}")
-        else:
-            page = select_page(context)
-        await page.bring_to_front()
-        log(f"Page: {page.url}")
-
-        if args.finalize_draft:
-            log("\n[1] Finalizing checked draft...")
-            final_url = await publish(page, scheduled_at)
-            log(f"\n{'='*60}")
-            log(f"  SCHEDULED: {final_url}")
-            log(f"{'='*60}")
-            return final_url
-
-        # 1. Открываем новый черновик
-        if not args.draft_url:
-            log("\n[1] Opening new article...")
-            await open_new_article(page)
-        else:
-            log("\n[1] Reusing existing draft...")
-
-        # 2. Ждём редактор
-        log("\n[2] Waiting for editor...")
-        await wait_for_ces(page, min_count=2, timeout_ms=15000)
-
-        # 3. Заполняем заголовок и тело
-        log("\n[3] Filling content...")
-        if args.paste_docx:
-            t_len, b_len = await fill_article_from_rich_clipboard(
-                page, TITLE, public_footer(args.footer_file), args.expected_pasted_images
-            )
-        else:
-            t_len, b_len = await fill_article(
-                page, TITLE, BODY, media_paths, sequence_blocks=sequence_blocks,
-                reuse_first_image=args.reuse_first_image,
-            )
-        log(f"  title={t_len} chars, body={b_len} chars")
-
-        if args.prepare_only:
-            log(f"  DRAFT PREPARED: {page.url}")
-            return page.url
-
-        # 4. Публикуем или ставим в отложку
-        action = f"Scheduling for {scheduled_at.isoformat()}" if scheduled_at else "Publishing now"
-        log(f"\n[4] {action}...")
-        final_url = await publish(page, scheduled_at)
-
-        log(f"\n{'='*60}")
-        log(f"  {'SCHEDULED' if scheduled_at else 'PUBLISHED'}: {final_url}")
-        log(f"{'='*60}")
-
-        # Keep the dedicated authorized Chrome session alive for the next run.
-        # Exiting async_playwright disconnects the CDP client without closing Chrome.
-        return final_url
+    if args.healthcheck:
+        from tools.chrome_cdp import endpoint
+        global CDP_URL
+        CDP_URL = endpoint()
+        async with async_playwright() as playwright:
+            browser = await connect_cdp(playwright)
+            select_page(browser.contexts[0])
+            print(json.dumps({"cdp": "ready", "authorization": "not_checked"}))
+        return 0
+    if not args.release:
+        raise ReleaseError("Нужен --release с утверждённой ревизией. Подготовьте manifest через tools/publish_release.py.")
+    if args.article or args.media or args.sequence or args.paste_docx or args.schedule or args.draft_url or args.finalize_draft or args.footer_file or args.reuse_first_image:
+        raise ReleaseError("Материалы, черновик и расписание берутся из утверждённого выпуска; независимые параметры запрещены.")
+    from tools.publish_release import main as release_main
+    action = 'check-dzen' if args.check else ('prepare-dzen' if args.prepare_only else 'schedule-dzen')
+    # The release CLI owns the lock and starts its own event loop.
+    return await asyncio.to_thread(release_main, [action, '--release', args.release])
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        raise SystemExit(asyncio.run(main()))
     except Exception as exc:
-        # Keep the CLI result machine-readable and bounded; callers can store
-        # this concrete error without confusing a traceback with a submission.
-        log(f"ERROR: {type(exc).__name__}: {exc}")
+        detail = str(exc) if isinstance(exc, ReleaseError) else "проверьте параметры и сохранённый выпуск; секреты скрыты."
+        log(f"ERROR: {type(exc).__name__}: {detail}")
         raise SystemExit(2)

@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)][string]$DocxPath,
-    [int]$SkipParagraphs = 2
+    [int]$SkipParagraphs = -1
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,6 +13,15 @@ try {
     $word.Visible = $false
     $word.DisplayAlerts = 0
     $document = $word.Documents.Open($resolved, $false, $true)
+    # Edit only the in-memory read-only document; Close(false) never changes the DOCX.
+    for ($index = $document.Paragraphs.Count; $index -ge 2; $index--) {
+        $paragraph = $document.Paragraphs.Item($index)
+        $text = $paragraph.Range.Text.Trim([char]13, [char]7, [char]32)
+        if ($text -match '^(Публикация:|ВИЗУАЛ НА ЭКРАН|СХЕМА НА ЭКРАН|КАРТИНКА НА ЭКРАН)' -or $text -eq '— — —') {
+            $paragraph.Range.Delete() | Out-Null
+        }
+    }
+    if ($SkipParagraphs -lt 0) { $SkipParagraphs = 1 }
     $start = $document.Content.Start
     for ($number = 1; $number -le $SkipParagraphs; $number++) {
         $start = $document.Paragraphs.Item($number).Range.End

@@ -71,6 +71,15 @@ def revision(manifest):
             files[key] = file_hash(local_path(manifest[key]))
     for name in manifest.get('dzen_images', []):
         files[name] = file_hash(local_path(name))
+    if 'dzen' in manifest.get('platforms', []):
+        if manifest.get('dzen_sequence_path'):
+            sequence = local_path(manifest['dzen_sequence_path'])
+            files['dzen_sequence_path'] = file_hash(sequence)
+            for block in read_json(sequence)['blocks']:
+                if block['type'] == 'image':
+                    files[block['path']] = file_hash(local_path(block['path']))
+        from tools.dzen_content import FOOTER
+        files['required_dzen_footer'] = file_hash(FOOTER)
     raw = json.dumps({'manifest': manifest, 'files': files}, sort_keys=True, ensure_ascii=False)
     return sha256(raw.encode()).hexdigest()
 
