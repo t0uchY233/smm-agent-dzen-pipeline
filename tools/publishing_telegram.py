@@ -1,8 +1,20 @@
 """Telegram user-session publishing; no bot token and no local timer."""
 from datetime import datetime, timezone
+from functools import lru_cache
+import importlib.util
 import os
+from pathlib import Path
 
 from tools.publishing_core import ReleaseError, local_path, require_future, scheduled_time, telegram_parts, probe_video
+
+
+@lru_cache(maxsize=1)
+def telegram_vendor():
+    path = Path(__file__).resolve().parents[1] / 'telegram-publish' / 'tg_post.py'
+    spec = importlib.util.spec_from_file_location('tg_post', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def telegram_client():
@@ -81,7 +93,14 @@ async def schedule_telegram(release, client):
     release.require_approval('telegram')
     m = release.manifest
     entity, channel_id = await verify_channel(client, m['telegram_channel'])
+    transport = telegram_vendor()
+    access_error = transport.check_chat_access(channel_id, entity)
+    if access_error:
+        raise ReleaseError(access_error)
     expected = require_future(m['scheduled_at'], m.get('timezone', 'Europe/Moscow'))
+    expected, schedule_error = transport.parse_schedule_date(expected.isoformat())
+    if schedule_error:
+        raise ReleaseError(schedule_error)
     url = release.youtube_url()
     text = release.text('telegram_text')
     if url not in text:
@@ -117,15 +136,25 @@ async def schedule_telegram(release, client):
         parts.append(part)
         state['materialized_revision'] = release.state['approved_revision']
         release.save()
-        if index == 0:
-            from telethon.tl.types import DocumentAttributeVideo
-            msg = await client.send_file(entity, uploaded, caption=chunks[index], parse_mode=None,
-                mime_type='video/mp4', force_document=False, supports_streaming=True,
-                attributes=[DocumentAttributeVideo(duration=duration, w=1920, h=1080,
-                                                   supports_streaming=True)], schedule=expected)
-        else:
-            msg = await client.send_message(entity, chunks[index], parse_mode=None,
-                                            link_preview=False, schedule=expected)
+        try:
+            if index == 0:
+                from telethon.tl.types import DocumentAttributeVideo
+                attribute = transport._video_send_attributes(str(video))
+                if attribute is None:
+                    attribute = DocumentAttributeVideo(duration=duration, w=1920, h=1080,
+                                                       supports_streaming=True)
+                msg = await transport.send_scheduled_file(
+                    client, entity, video, chunks[index], expected,
+                    uploaded=uploaded, attributes=[attribute])
+            else:
+                msg = await transport.send_scheduled_text(client, entity, chunks[index], expected)
+        except Exception as error:
+            if transport._is_flood_wait(error):
+                raise ReleaseError(
+                    f'Telegram просит подождать {error.seconds} с. '
+                    'Результат отправки требует сверки; не повторяйте вслепую.'
+                ) from error
+            raise
         part.update(id=msg.id, status='scheduled', document_id=getattr(getattr(msg, 'document', None), 'id', None))
         release.save()
     status = await check_telegram(release, client)
