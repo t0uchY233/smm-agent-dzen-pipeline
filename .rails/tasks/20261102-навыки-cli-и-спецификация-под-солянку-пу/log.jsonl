@@ -1,0 +1,11 @@
+{"at": "2026-11-02T14:13:49+00:00", "event": "start", "stage": "design", "lane": "feature", "why": "Меняет поведение агента публикаций (навыки), документы-контракт и зависимости"}
+{"at": "2026-11-02T14:14:11+00:00", "event": "approve", "stage": "design", "quote": "да. Можешь больше не спрашивать меня (до критического момента)", "stages": ["design"]}
+{"at": "2026-11-02T14:14:11+00:00", "event": "advance", "stage": "plan", "from": "design"}
+{"at": "2026-11-02T14:14:11+00:00", "event": "approve", "stage": "plan", "quote": "да. Можешь больше не спрашивать меня (до критического момента)", "stages": ["plan"]}
+{"at": "2026-11-02T14:14:11+00:00", "event": "advance", "stage": "implement", "from": "plan"}
+{"at": "2026-11-02T14:31:46+00:00", "event": "back", "stage": "plan", "from": "implement", "reason": "Ревью исполнителя: устаревшие фразы в dzen-publish/README.md о зависимостях и маршруте"}
+{"at": "2026-11-02T14:31:46+00:00", "event": "approve", "stage": "plan", "quote": "да. Можешь больше не спрашивать меня (до критического момента)", "stages": ["plan"]}
+{"at": "2026-11-02T14:31:46+00:00", "event": "advance", "stage": "implement", "from": "plan"}
+{"at": "2026-11-02T14:31:52+00:00", "event": "advance", "stage": "verify", "from": "implement"}
+{"at": "2026-11-02T14:32:02+00:00", "event": "back", "stage": "implement", "from": "verify", "reason": "Правка dzen-publish/README.md не применилась"}
+{"at": "2026-11-02T14:32:09+00:00", "event": "advance", "stage": "verify", "from": "implement"}

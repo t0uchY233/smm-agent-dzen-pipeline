@@ -1,43 +1,46 @@
-# CDP recovery when a browser tool is restricted
+# Подключение и восстановление CDP
 
-Read this reference only when a browser connector refuses to open or operate the Dzen editor because of its own security policy.
+Пути указаны от корня репозитория. Отказ отдельного Browser-инструмента — ограничение этого инструмента, не доказательство недоступности Дзена. Основной путь остаётся `tools/publish_release.py` через `tools/publishing_dzen.py` и `dzen-publish/`.
 
-That error is a restriction of the connector. It is not evidence that Dzen, the logged-in Chrome profile, or the local editor path is unavailable.
+## Предварительная проверка
 
-## Required preflight
+На Linux используй `.venv/bin/python`, на Windows — `.venv/Scripts/python.exe`. Read-only проверка endpoint:
 
-Check the local Chrome DevTools Protocol endpoint before returning a blocker:
-
-```powershell
-(Invoke-RestMethod -TimeoutSec 5 -Uri 'http://127.0.0.1:9222/json/version').Browser
+```text
+python tools/chrome_cdp.py --check
+python dzen-publish/publish_dzen.py --healthcheck
 ```
 
-If it returns a Chrome version, do not use Browser Use or Computer Use. First run the repository health check:
+Она не создаёт черновик и не доказывает авторизацию. Перед изменением статьи адаптер отдельно проверяет целевой канал и права редактора. При первой работе после изменений разметки сначала проверь существующий утверждённый выпуск через `tools/publish_release.py check-dzen --release <dir>`; если выпуска ещё нет, доступность канала проверяется preflight до создания черновика.
 
-```powershell
-.\\.venv\\Scripts\\python.exe .\\dzen-publish\\publish_dzen.py --healthcheck
+## Linux, локальный режим
+
+Если endpoint недоступен, запусти безопасный helper и повтори read-only проверку:
+
+```text
+python tools/chrome_cdp.py
 ```
 
-The health check is mandatory before opening a draft. It performs a bounded CDP connection test and does not navigate, upload, or submit anything. The script itself makes one connection retry (15 seconds per attempt); if the health check times out, rerun the idempotent helper below once and repeat the health check once. Do not mark the release `failed` after only the first connection timeout; keep it `unconfirmed` until this recovery sequence and result reconciliation are complete.
+Нужен desktop-сеанс либо постоянный Xvfb DISPLAY. Helper использует отдельный профиль `.local/auth/chrome-dzen`; обычные окна не закрывает. Путь браузера задаёт `CHROME_BINARY`, профиль — `DZEN_CHROME_PROFILE`. Локальный запуск от root запрещён: не обходи запрет через `--no-sandbox`; используй авторизованный внешний браузер или сообщи блокер. Не создавай временный DISPLAY, который исчезнет во время входа.
 
-After a successful health check, use the verified repository path through the already authorized session:
-
-```powershell
-.\.venv\Scripts\python.exe .\dzen-publish\publish_dzen.py .\article.txt --media .\assets\cover.png --schedule 2026-09-24T14:00
-```
-
-Pass every approved local image after `--media`; omit `--schedule` for immediate release. The script connects to the existing Chrome instance at `http://127.0.0.1:9222`, creates the draft, confirms image previews, and follows the normal Dzen editor flow. Apply the approval and verification rules in `SKILL.md` before running a command that submits a release.
-
-If the endpoint does not answer, start it automatically with the safe project helper, then repeat the preflight:
+## Windows
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\dzen-publish\ensure_cdp_chrome.ps1
+powershell -NoProfile -File .\dzen-publish\ensure_cdp_chrome.ps1
 ```
 
-The helper uses the dedicated profile at `C:\temp\chrome-cdp-profile`, which retains the user’s Dzen login. It never closes ordinary Chrome windows. If its first run needs a login, report that concrete condition after the helper has opened the browser; do not request cookies or a CSRF token.
+Профиль по умолчанию — `C:/temp/chrome-cdp-profile`. Общий `tools/chrome_cdp.py` также вызывает этот helper на Windows, передавая порт и профиль. Не запускай оба helper подряд без причины. Если нужен вход, пользователь выполняет его локально в этом профиле; не запрашивай cookies.
 
-Only if the publication script cannot attach or cannot complete an editor step despite a successful health check may an available computer/browser-control tool be used against the existing authenticated Chrome session. Keep the same draft, media, submission, and independent-verification checks. A connection timeout before the editor opens is not a submission and is handled by the bounded health-check recovery above.
+## Внешний CDP
 
-## Actual stopping condition
+`DZEN_CDP_MODE=external` означает: использовать уже доступный браузер, не запускать локальный Chrome даже при отказе endpoint. `DZEN_CDP_URL` допускает только HTTP loopback (`127.0.0.1` или `localhost`), без credentials, query, fragment и постороннего пути. Удалённый браузер подключается через заранее настроенный SSH-туннель. Не открывай CDP наружу и не меняй туннель или учётные данные без разрешения.
 
-If the helper cannot restore CDP *and* no browser-control tool is available, preserve the prepared revision and report the helper’s concrete error and the unavailable controller. Do not describe this as a Dzen policy block.
+При недоступности внешнего CDP восстанови разрешённое существующее подключение либо сообщи блокер. Переключение на новый локальный профиль не восстанавливает прежнюю авторизацию.
+
+## Бюджет восстановления и остановка
+
+Подключение адаптера ограничено двумя попытками до редактора. При отдельной диагностике допускается один повтор helper и healthcheck; не оборачивай CLI в бесконечный цикл. Первый таймаут не доказывает `failed` и не разрешает повтор отправки. После изменения черновика или попытки назначения — только сверка существующего объекта, сохранение неопределённости и точный блокер.
+
+После успешного preflight основной маршрут утверждённой версии: `tools/publish_release.py prepare-dzen --release <dir>` → `tools/publish_release.py schedule-dzen --release <dir>` → отдельный `tools/publish_release.py check-dzen --release <dir>`.
+
+Browser Use/Computer Use — только доступный резерв после конкретного сбоя CDP, без нового черновика и слепой отправки. Если helper не восстановил соединение, перечисли наблюдаемую ошибку и доступность резерва, не называй это политикой Дзена. `tools/publish_release.py record-browser` лишь сохраняет доказательство; он не управляет браузером.

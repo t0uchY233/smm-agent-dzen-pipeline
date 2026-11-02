@@ -1,38 +1,29 @@
 ---
 name: dzen
-description: Publish or schedule approved materials on Dzen.ru, including local image attachments. Use the authorized channel editor, verify every upload, and confirm the public or scheduled result.
+description: Подготовить, назначить или проверить утверждённую статью Дзена через общий CLI и авторизованный Chrome CDP, сохраняя порядок изображений DOCX и защиту от дублей.
 ---
 
-# Dzen Publisher
+# Публикация в Дзен
 
-Use this skill for Dzen.ru publication tasks: an article with attachments, a test publication, or an approved delayed release. The project channel is `https://dzen.ru/profile/editor/ekonomikadliavseh` unless the user specifies another.
+Прочитай `docs/dzen-publication-route.md` и `docs/specs/content-release.md`. Пути здесь — от корня репозитория. Основной транспорт — `dzen-publish/`, происхождение и ограничение лицензии описаны в `dzen-publish/UPSTREAM.md`. Пользуйся проектным Python, не самостоятельными командами отправки вендора.
 
-## Execution route
+## Маршрут
 
-In this project, `dzen-publish/` is the primary and required transport for Dzen. Start every publication with `dzen-publish/ensure_cdp_chrome.ps1`, then run `publish_dzen.py --healthcheck` before opening a draft. The health check is read-only, bounded, and retries the CDP connection once. After it succeeds, use `publish_dzen.py` with `--media` and, for an approved delayed release, `--schedule YYYY-MM-DDTHH:MM`. Do not select Browser Use or Computer Use to create, upload, format, or schedule a Dzen article while this repository path is available. Those tools are only a recovery path after the script has produced a concrete, observed CDP/editor failure despite a successful health check.
+1. Если пользователь назвал только Дзен, не изменяй YouTube и Telegram. Прочитай DOCX через `tools/read_docx.py`, проверь журнал и состояние существующего выпуска. Просьба улучшить навык не разрешает публикацию.
+2. Локально подготовь заголовок, статью, изображения, канал и будущее время. Для DOCX с изображениями создай `dzen_sequence_path` через `tools/extract_docx_dzen_sequence.py`: единый поток «абзац → изображение → следующий абзац». Не собирай картинки списком после текста. Текст sequence должен совпадать с `dzen_article`; число, порядок и содержимое изображений — с DOCX. Добавь ровно один финальный блок из `.agents/skills/dzen/references/required-footer.md` с пятью активными ссылками.
+3. Выполни `tools/publish_release.py prepare --manifest <json>` → `tools/publish_release.py status --release <dir>`. Покажи материал, изображения, канал, время МСК и revision. После утверждения этой версии — `tools/publish_release.py approve --release <dir> --revision <hash>`. Уже утверждённую неизменную версию не пересогласовывай.
+4. Подключи CDP по `.agents/skills/dzen/references/cdp-recovery.md`. Linux использует `tools/chrome_cdp.py`, Windows — `dzen-publish/ensure_cdp_chrome.ps1`; `DZEN_CDP_MODE=external` запрещает локальный запуск браузера. Доступный CDP не доказывает вход и право редактирования: адаптер проверяет целевой канал перед изменениями.
+5. Выполни `tools/publish_release.py prepare-dzen --release <dir>`: это внешний черновик, разрешённый только после утверждения. Затем `tools/publish_release.py schedule-dzen --release <dir>`. CLI также умеет создать черновик внутри schedule-dzen, но отдельный prepare-dzen позволяет проверить его перед назначением. Не запускай вторую цепочку для того же выпуска.
+6. Отдельным запуском выполни `tools/publish_release.py check-dzen --release <dir>`. Проверь канал, идентичность объекта, точную московскую дату, полный текст, позиции и загрузку изображений, пять ссылок. Сохрани доказательство и сообщи URL, время и статус. Будущая отложка — «Запланировано».
 
-## Publication route
+Windows с Word допускает rich paste; Linux и Windows без Word используют упорядоченные блоки того же транспорта. Выбирай `dzen_docx_mode=sequence` до утверждения, если нужен явный режим sequence. Проверяй количество и ненулевые размеры всех изображений, контекст до/после каждого, а не только успешную загрузку файла. Материалы нельзя незаметно заменить текстовой версией.
 
-1. Prepare one revision containing the title, body, local media files, channel, visibility, and intended publication time. Preserve approved text and files. Append exactly one copy of the [required Dzen footer](references/required-footer.md) after the body of every Dzen article, separated by a blank line. It must be the final visible article content; do not duplicate it if it is already present. For delayed publication, use `Europe/Moscow` unless the user gives another timezone, and leave at least one minute before the scheduled time.
-2. Use the logged-in browser session. Session data, if needed by a local client, belongs only in `.local/auth/dzen_config.json`. Never ask the user to paste cookies or a CSRF token into chat, or write them to logs. If the browser is logged out or a session request returns `403`, stop for browser login and do not retry blindly.
-3. Validate attachments before editing the draft. Supported images are `.png`, `.jpg`, `.jpeg`, `.bmp`, `.webp`, and `.gif`. A requested attachment remains part of the revision; do not silently publish a text-only substitute. For a DOCX with embedded images, run `tools/copy_docx_body_to_clipboard.ps1` and keep its rich clipboard intact until Dzen imports it. Build `tools/extract_docx_dzen_sequence.py` as an independent order manifest for verification and recovery.
-4. In the channel editor, import a DOCX through `dzen-publish/publish_dzen.py --paste-docx <file> --expected-pasted-images <count> --footer-file <footer>`: Word pastes text and drawings together in source order. Never append or prepend all DOCX images as one batch. Use `--sequence <ordered.json>` only when rich paste is unavailable. Wait for `[data-testid="article-image-item"] img`; check the expected count, non-zero natural dimensions, and text context before and after every image before submission. The project’s verified local path is `dzen-publish/publish_dzen.py --media <image...> [--schedule YYYY-MM-DDTHH:MM]` through Chrome CDP at `http://localhost:9222`.
-5. Before an external mutation, show the exact revision, channel, attachments, visibility, and publication time. Follow `AGENTS.md`: immediate public publication needs an explicit user request; a delayed release needs approval of this exact revision and schedule.
-6. Submit once. For immediate publication leave **«Опубликовать позже»** unchecked. For a delayed release, select it, enter the approved date and time, and verify the displayed schedule before submission. A timeout before the editor opens triggers the bounded health-check recovery and does not by itself make the release `failed`. A timeout after draft mutation or an ambiguous response requires checking the existing draft or result before any submission retry.
-7. Verify independently after submission: obtain the URL or scheduled status, then check title, body, channel, visibility/time, image count, and the required footer with its active links. Save evidence and per-platform state in `.tmp/publishing/<release-base>/` and `publish-log.md`. A local click alone is not proof of publication.
+## Сбои и ограничения
 
-## Browser access
+При неопределённом результате или ошибке инструмента останови внешние изменения, выполни доступные `status`/`check-dzen` и сообщи блокер. Не повторяй отправку, не сбрасывай `attempted`/`draft_attempted`, не создавай новый черновик. Если URL черновика неизвестен, сначала найди существующий объект; отдельной CLI-команды его привязки пока нет. Не исправляй это ручным сбросом состояния.
 
-A browser connector reporting that access to the Dzen editor is blocked by its security policy does **not** prove that Dzen or the authenticated browser session is unavailable. It limits that connector only. Before returning such a blocker, read [the CDP recovery guide](references/cdp-recovery.md), run the safe CDP starter when the endpoint is absent, and complete the repository `--healthcheck`. Only report a blocked release after the health-check recovery, the local CDP publication path, and every available browser-control path have failed with observed, specific errors. A first CDP connection timeout must never be reported as the final blocker.
+Browser Use/Computer Use допустимы только после наблюдаемого сбоя основного CDP-пути, для сверки и восстановления того же объекта, не для слепого повтора. Ограничение браузерного инструмента не доказывает недоступность Дзена: сначала ограниченный CDP-preflight. Если контроллер недоступен, сообщи об этом; не требуй запуска несуществующего инструмента. `record-browser` сохраняет наблюдение, не выполняет публикацию.
 
-## Fallback
+Новая разметка Дзена требует первой read-only проверки существующего утверждённого выпуска; локальные тесты её не заменяют. Текущий CDP observe подтверждает очередь будущих публикаций, но не реализует полноценную проверку публичного выхода после срока. Исчезновение статьи из очереди не означает успех. Немедленный выпуск общий CLI не поддерживает — не заменяй его неутверждённой отложкой или старой вендорной командой.
 
-Do not assume the upstream `scripts/publish.py` exists or invent an undocumented Dzen API. The repository CDP script remains the default for both immediate and scheduled publication. Use Browser Use or Computer Use only after that script has failed despite a verified CDP session, and report the exact script failure if the fallback also fails.
-
-For the project’s immediate editor path:
-
-```powershell
-python .\dzen-publish\publish_dzen.py .\article.txt --media .\assets\cover.png .\assets\photo.jpg --schedule 2026-09-24T14:00
-```
-
-Omit `--schedule` for immediate publication. A delayed release must still use the approved release workflow so its schedule is explicitly entered and verified.
+Нет входа — сохрани комплект и сообщи, что нужен локальный вход в выбранном профиле. Cookies, коды, пароли и токены не запрашивай в чате и не выводи в логи.
