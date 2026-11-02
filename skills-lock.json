@@ -5,6 +5,12 @@
       "source": "claude-office-skills/skills",
       "sourceType": "github",
       "computedHash": "bcc46df3f1891c0150f209857b7e510ab016925c71bca0bf48ade99d02f0bc80"
+    },
+    "engineering-rails": {
+      "source": "t0uchY233/engineering-rails-skill",
+      "sourceType": "github",
+      "skillPath": "skills/engineering-rails/SKILL.md",
+      "computedHash": "ea74299154c97a5fb53e32b6b1d4f934c92d204da124596ffdc56a38d768da2c"
     }
   }
 }
