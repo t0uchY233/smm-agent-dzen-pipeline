@@ -19,6 +19,9 @@ REPO_PATH = re.compile(
     r'(?:tools|youtube-publish|telegram-publish|dzen-publish|\.agents|docs)/'
     r'[^\s`\"\'<>|()\[\]{},;]*'
 )
+# Явные Markdown-ссылки и одиночные пути в inline-code, не shell-команды.
+EXPLICIT_PATH = re.compile(r'\[[^\]\n]*\]\(([^\s)]+)\)|(?<!`)`([^`\n]+)`(?!`)')
+REPO_DIRS = {'tools', 'youtube-publish', 'telegram-publish', 'dzen-publish', '.agents', 'docs'}
 SLASH_COMMAND = re.compile(r'(?<![\w./:])\/([a-z][a-z0-9-]*)(?=[\s`\"<]|$)')
 
 
@@ -39,6 +42,33 @@ def repo_paths(text):
     for match in REPO_PATH.finditer(text):
         value = match.group().removeprefix('./').rstrip('.,:;')
         yield value
+
+
+def document_paths(text, document, root=ROOT):
+    """Корневые пути — от root, ./ и ../ и прочие Markdown-ссылки — от документа."""
+    text = text.replace('\\', '/')
+    remainder = list(text)
+    for match in EXPLICIT_PATH.finditer(text):
+        link, code = match.groups()
+        reference = link or code
+        if (re.match(r'^[a-zA-Z][a-zA-Z0-9+.-]*:', reference)
+                or reference.startswith(('#', '/'))):
+            continue  # URL, якорь или абсолютный путь вне контракта репозитория.
+        reference = reference.split('#', 1)[0]
+        if not reference or any(c.isspace() for c in reference):
+            continue
+        relative = reference.startswith(('./', '../'))
+        root_markdown = '/' not in reference and reference.endswith('.md')
+        rooted = reference.split('/', 1)[0] in REPO_DIRS
+        if not (relative or root_markdown or rooted or (link and Path(reference).suffix)):
+            continue
+        # Не проверяем тот же ./tools/... второй раз относительно корня.
+        remainder[match.start():match.end()] = ' ' * (match.end() - match.start())
+        base = document.parent if relative or not (rooted or root_markdown) else root
+        yield base, reference
+    # Сохраняем прежнюю проверку путей в командах и обычном тексте.
+    for reference in repo_paths(''.join(remainder)):
+        yield root, reference
 
 
 @pytest.fixture
@@ -79,11 +109,11 @@ def test_documented_actions_exist(cli_actions):
 def test_documented_repo_paths_exist():
     errors = []
     for path in documents():
-        for reference in repo_paths(path.read_text(encoding='utf-8')):
+        for base, reference in document_paths(path.read_text(encoding='utf-8'), path, ROOT):
             # <placeholder> обрезан регулярным выражением: проверяем его каталог.
             # Для glob нужна хотя бы одна реальная цель, а не только её родитель.
-            exists = (any(ROOT.glob(reference)) if any(c in reference for c in '*?')
-                      else (ROOT / reference).exists())
+            exists = (any(base.glob(reference)) if any(c in reference for c in '*?')
+                      else (base / reference).exists())
             if not exists:
                 errors.append(f'{path.relative_to(ROOT)}: отсутствует {reference}')
     assert not errors, '\n'.join(errors)
@@ -150,3 +180,38 @@ def test_path_extraction_ignores_urls_and_keeps_local_paths():
         'tools/read_docx.py', 'docs/specs/content-release.md',
         'dzen-publish/publish_dzen.py',
     ]
+
+
+@pytest.mark.parametrize('reference,target', [
+    ('`../other/SKILL.md`', 'skills/other/SKILL.md'),
+    ('[навык](../other/SKILL.md#route)', 'skills/other/SKILL.md'),
+    ('`./references/guide.md`', 'skills/current/references/guide.md'),
+    ('[гайд](./references/guide.md)', 'skills/current/references/guide.md'),
+    ('[гайд](references/guide.md)', 'skills/current/references/guide.md'),
+    ('`tone-of-voice.md`', 'tone-of-voice.md'),
+    ('[тон](tone-of-voice.md)', 'tone-of-voice.md'),
+    ('`./tools/local.py`', 'skills/current/tools/local.py'),
+    ('`tools/root.py`', 'tools/root.py'),
+])
+def test_documented_paths_detect_removed_file(tmp_path, monkeypatch, reference, target):
+    document = tmp_path / 'skills/current/SKILL.md'
+    document.parent.mkdir(parents=True)
+    document.write_text(reference, encoding='utf-8')
+    destination = tmp_path / target
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text('content', encoding='utf-8')
+    monkeypatch.setitem(globals(), 'ROOT', tmp_path)
+    monkeypatch.setitem(globals(), 'documents', lambda: [document])
+    test_documented_repo_paths_exist()
+    destination.unlink()
+    # Проверяем всю проверку документов, не только результат regex.
+    with pytest.raises(AssertionError, match='отсутствует'):
+        test_documented_repo_paths_exist()
+
+
+def test_document_paths_ignore_external_links_and_prose(tmp_path):
+    document = tmp_path / 'skills/current/SKILL.md'
+    text = ('[сайт](https://example.org/guide.md) '
+            '`https://example.org/tools/remote.py` [почта](mailto:user@example.org) '
+            '[раздел](#route) `status` обычные слова')
+    assert list(document_paths(text, document, tmp_path)) == []

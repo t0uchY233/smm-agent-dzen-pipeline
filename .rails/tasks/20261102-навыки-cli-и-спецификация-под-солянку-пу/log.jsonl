@@ -9,3 +9,5 @@
 {"at": "2026-11-02T14:31:52+00:00", "event": "advance", "stage": "verify", "from": "implement"}
 {"at": "2026-11-02T14:32:02+00:00", "event": "back", "stage": "implement", "from": "verify", "reason": "Правка dzen-publish/README.md не применилась"}
 {"at": "2026-11-02T14:32:09+00:00", "event": "advance", "stage": "verify", "from": "implement"}
+{"at": "2026-11-02T14:41:07+00:00", "event": "back", "stage": "implement", "from": "verify", "reason": "Ревью T5: относительные ссылки в тесте, пример manifest Дзена, CDP endpoint в диагностике"}
+{"at": "2026-11-02T14:45:25+00:00", "event": "advance", "stage": "verify", "from": "implement"}

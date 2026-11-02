@@ -4,14 +4,16 @@
 
 ## Предварительная проверка
 
-На Linux используй `.venv/bin/python`, на Windows — `.venv/Scripts/python.exe`. Read-only проверка endpoint:
+На Linux используй `.venv/bin/python`, на Windows — `.venv/Scripts/python.exe`. Обе read-only диагностики должны получать один `DZEN_CDP_URL`. Общий helper читает `.env`, самостоятельный healthcheck — только окружение процесса. Из корня репозитория выполни:
 
 ```text
 python tools/chrome_cdp.py --check
-python dzen-publish/publish_dzen.py --healthcheck
+python -c "from dotenv import load_dotenv; import subprocess, sys; load_dotenv('.env', override=False); sys.exit(subprocess.call([sys.executable, 'dzen-publish/publish_dzen.py', '--healthcheck']))"
 ```
 
-Она не создаёт черновик и не доказывает авторизацию. Перед изменением статьи адаптер отдельно проверяет целевой канал и права редактора. При первой работе после изменений разметки сначала проверь существующий утверждённый выпуск через `tools/publish_release.py check-dzen --release <dir>`; если выпуска ещё нет, доступность канала проверяется preflight до создания черновика.
+Обёртка загружает настройки локально и передаёт их healthcheck через унаследованное окружение, не печатая `.env` или его значения. Уже заданные переменные окружения имеют приоритет в обоих вызовах; между проверками не меняй окружение и `.env`. Не используй `cat .env`, вывод окружения или shell-tracing для диагностики. Команды выше только проверяют подключение, не запускают Chrome.
+
+Эти проверки не создают черновик и не доказывают авторизацию. Перед изменением статьи адаптер отдельно проверяет целевой канал и права редактора. При первой работе после изменений разметки сначала проверь существующий утверждённый выпуск через `tools/publish_release.py check-dzen --release <dir>`; если выпуска ещё нет, доступность канала проверяется preflight до создания черновика.
 
 ## Linux, локальный режим
 
@@ -25,11 +27,13 @@ python tools/chrome_cdp.py
 
 ## Windows
 
+Используй общий helper, особенно при нестандартном порте или профиле:
+
 ```powershell
-powershell -NoProfile -File .\dzen-publish\ensure_cdp_chrome.ps1
+.\.venv\Scripts\python.exe tools/chrome_cdp.py
 ```
 
-Профиль по умолчанию — `C:/temp/chrome-cdp-profile`. Общий `tools/chrome_cdp.py` также вызывает этот helper на Windows, передавая порт и профиль. Не запускай оба helper подряд без причины. Если нужен вход, пользователь выполняет его локально в этом профиле; не запрашивай cookies.
+Он читает `.env`, учитывает `DZEN_CDP_URL`, `DZEN_CHROME_PROFILE` и `DZEN_CDP_MODE`, а в локальном режиме вызывает `dzen-publish/ensure_cdp_chrome.ps1` с нужными портом и профилем. Профиль по умолчанию — `C:/temp/chrome-cdp-profile`. Прямой PowerShell-вызов без параметров не переносит эти настройки из `.env`; не используй его вместо общего helper при нестандартной конфигурации. Не запускай оба helper подряд без причины. Если нужен вход, пользователь выполняет его локально в этом профиле; не запрашивай cookies.
 
 ## Внешний CDP
 

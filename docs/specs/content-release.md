@@ -77,12 +77,14 @@ DOCX и MP4: `YYYY-MM-DD-HHMM-Русский заголовок` с разным
   "platforms": ["youtube", "telegram", "dzen"],
   "youtube_channel": "UC_CHANNEL_ID",
   "telegram_channel": "-1001234567890",
-  "dzen_channel": "https://dzen.ru/CHANNEL",
+  "dzen_channel": "https://dzen.ru/profile/editor/CHANNEL",
   "telegram_text": "Утверждённый текст\n{youtube_url}",
   "dzen_article": "Утверждённая статья\n{youtube_url}",
   "dzen_images": []
 }
 ```
+
+`dzen_article` в примере — сокращённый шаблон, не готовая статья. До `prepare` добавь к полному тексту ровно один полный обязательный футер из `.agents/skills/dzen/references/required-footer.md`; если он уже есть в конце статьи, не добавляй второй. Замени `CHANNEL` точным идентификатором редактора своего канала.
 
 `youtube_category` необязательна: пример `28` не рекомендация для всех выпусков. Если поле отсутствует, адаптер не отправляет categoryId; значение по умолчанию вендора не подставляется.
 
