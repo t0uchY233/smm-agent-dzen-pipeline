@@ -1,6 +1,9 @@
 """YouTube OAuth, private upload, native scheduling and read-back verification."""
 from datetime import datetime, timezone
+from functools import lru_cache
+import importlib.util
 import os
+from time import sleep
 from pathlib import Path
 
 from tools.publishing_core import ReleaseError, local_path, require_future, scheduled_time, probe_video
@@ -8,6 +11,53 @@ from tools.publishing_core import ReleaseError, local_path, require_future, sche
 SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl',
           'https://www.googleapis.com/auth/youtube.readonly']
 WEB_REDIRECT_URI = 'http://localhost:8765/'
+
+
+@lru_cache(maxsize=1)
+def youtube_vendor():
+    path = Path(__file__).resolve().parents[1] / 'youtube-publish' / 'yt_upload.py'
+    spec = importlib.util.spec_from_file_location('yt_upload', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def release_plan(manifest, marker=None):
+    plan = {'video': str(local_path(manifest['video_path']).resolve()),
+            'thumbnail': str(local_path(manifest['thumbnail_path']).resolve()),
+            'title': manifest['title'], 'description': manifest['description'],
+            'tags': [marker] if marker else [], 'privacy': 'private',
+            'madeForKids': manifest['made_for_kids']}
+    if manifest.get('youtube_category'):
+        plan['categoryId'] = manifest['youtube_category']
+    return plan
+
+
+def validate_plan(plan):
+    errors = youtube_vendor().validate(plan)
+    if errors:
+        raise ReleaseError('YouTube: ' + '; '.join(errors))
+
+
+def upload_body(plan):
+    body = youtube_vendor().build_body(plan)
+    # Keep the channel default unless the approved manifest specifies a category.
+    if 'categoryId' not in plan:
+        body['snippet'].pop('categoryId', None)
+    return body
+
+
+def preview_youtube(release):
+    if 'youtube' not in release.manifest['platforms']:
+        raise ReleaseError('YouTube не входит в комплект.')
+    if release.manifest.get('youtube_id'):
+        raise ReleaseError('Указан существующий YouTube ID: загрузка не планируется.')
+    plan = release_plan(release.manifest, 'codex-release-' + release.state['release_id'])
+    validate_plan(plan)
+    body = upload_body(plan)
+    # Upstream preview indexes categoryId; this display label is never sent to the API.
+    body['snippet'].setdefault('categoryId', '(channel default)')
+    youtube_vendor().preview(plan, body)
 
 
 def web_client_config():
@@ -93,6 +143,7 @@ def check_youtube(release, service):
 
 
 def schedule_youtube(release, service):
+    from googleapiclient.errors import HttpError
     from googleapiclient.http import MediaFileUpload
 
     release.require_approval('youtube')
@@ -112,15 +163,25 @@ def schedule_youtube(release, service):
         probe_video(local_path(m['video_path']))
         # The marker is also visible in Studio tags for manual reconciliation after an uncertain upload.
         marker = 'codex-release-' + release.state['release_id']
+        plan = release_plan(m, marker)
+        validate_plan(plan)
+        body = upload_body(plan)
+        require_future(m['scheduled_at'], m.get('timezone', 'Europe/Moscow'))
         release.update('youtube', upload_attempted=True, status='uploading', marker=marker,
                        materialized_revision=release.state['approved_revision'])
-        request = service.videos().insert(part='snippet,status', body={
-            'snippet': {'title': m['title'], 'description': m['description'], 'tags': [marker]},
-            'status': {'privacyStatus': 'private', 'selfDeclaredMadeForKids': m['made_for_kids']}},
-            media_body=MediaFileUpload(str(local_path(m['video_path'])), chunksize=8 * 1024 * 1024, resumable=True))
+        request = service.videos().insert(part='snippet,status', body=body,
+            media_body=MediaFileUpload(plan['video'], chunksize=8 * 1024 * 1024, resumable=True))
         response = None
+        retries = 0
         while response is None:
-            _, response = request.next_chunk(num_retries=0)
+            try:
+                _, response = request.next_chunk(num_retries=0)
+            except HttpError as error:
+                if error.resp.status in (500, 502, 503, 504) and retries < 5:
+                    retries += 1
+                    sleep(2 ** retries)
+                    continue
+                raise
         video_id = response['id']
         release.update('youtube', id=video_id, status='uploaded')
     item = check_youtube(release, service)

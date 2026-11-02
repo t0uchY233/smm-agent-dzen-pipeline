@@ -36,7 +36,7 @@
 ## Критерии приёмки
 - AC-1: `schedule_youtube` строит тело insert через upstream `build_body` (private, без publishAt, теги = [marker]) и назначает publishAt по МСК отдельным update, только после обложки — проверка: тест `test_youtube_private_upload_then_schedule_and_no_duplicate` (обновлённый) + `test_youtube_insert_body_from_upstream`
 - AC-2: ошибки upstream `validate` (заголовок с `|`, обложка > 2 МБ) дают `ReleaseError` на `prepare` и не вызывают API — проверка: тесты `test_youtube_upstream_validation_blocks_prepare[title_pipe|thumb_size]`
-- AC-3: ответ 503 на `next_chunk` повторяется в той же сессии, insert вызывается ровно один раз; после 5 неудач — ошибка без повторного insert — проверка: тест `test_youtube_resumable_retries_5xx_without_second_insert`
+- AC-3: ответ 503 на `next_chunk` повторяется в той же сессии, insert вызывается ровно один раз; после исходной попытки и 5 повторов (итого 6 вызовов next_chunk) — ошибка без повторного insert — проверка: тест `test_youtube_resumable_retries_5xx_without_second_insert`
 - AC-4: `preview-youtube --release` печатает upstream-превью без сети и OAuth — проверка: тест `test_preview_youtube_cli_offline`
 - AC-5: прежние гарантии не ослаблены: неизвестный результат загрузки блокирует повтор, `youtube_id` = только чтение, чужой канал и несовпадение времени не считаются успехом — проверка: существующие тесты `tools/test_publishing.py` проходят без ослабления assert'ов
 - AC-6: вендорный файл не изменён — проверка: `test_youtube_vendor_matches_recorded_hash` из T1

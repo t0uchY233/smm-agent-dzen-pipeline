@@ -68,7 +68,7 @@ def main(argv=None):
     p = sub.add_parser('prepare')
     p.add_argument('--manifest', required=True)
     p.add_argument('--directory')
-    for action in ('approve', 'status', 'schedule-youtube', 'check-youtube',
+    for action in ('approve', 'status', 'schedule-youtube', 'check-youtube', 'preview-youtube',
                    'schedule-telegram', 'check-telegram', 'render-texts'):
         p = sub.add_parser(action)
         p.add_argument('--release', required=True)
@@ -86,9 +86,10 @@ def main(argv=None):
     p.add_argument('--evidence', required=True)
     args = parser.parse_args(argv)
     try:
-        # Only this entrypoint reads .env. No config values are echoed.
-        from dotenv import load_dotenv
-        load_dotenv(ROOT / '.env', override=False)
+        # Offline YouTube preview must not load credentials or depend on .env.
+        if args.action != 'preview-youtube':
+            from dotenv import load_dotenv
+            load_dotenv(ROOT / '.env', override=False)
         if args.action == 'prepare':
             m = read_json(args.manifest)
             m.setdefault('timezone', os.getenv('PUBLISH_TIMEZONE', 'Europe/Moscow'))
@@ -120,6 +121,9 @@ def main(argv=None):
                         (release.directory / filename).write_text(release.text(key), encoding='utf-8')
             elif args.action == 'record-browser':
                 record_browser(release, args.platform, read_json(args.evidence))
+            elif args.action == 'preview-youtube':
+                from tools.publishing_youtube import preview_youtube
+                preview_youtube(release)
             elif args.action.endswith('youtube'):
                 from tools.publishing_youtube import youtube_service, schedule_youtube, check_youtube
                 service = youtube_service()

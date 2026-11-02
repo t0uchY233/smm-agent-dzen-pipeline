@@ -123,6 +123,10 @@ def test_youtube_private_upload_then_schedule_and_no_duplicate(release):
     body = service.videos().insert.call_args.kwargs['body']
     assert body['status']['privacyStatus'] == 'private'
     assert 'publishAt' not in body['status']
+    assert body['snippet']['tags'] == ['codex-release-' + release.state['release_id']]
+    assert 'categoryId' not in body['snippet']
+    assert service.thumbnails().set.call_count == 1
+    assert service.videos().update.call_args.kwargs['body']['status']['publishAt'] == '2035-01-20T11:00:00+00:00'
     yt.schedule_youtube(release, service)
     assert service.videos().insert.call_count == 1
 

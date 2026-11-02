@@ -102,6 +102,9 @@ def validate_manifest(m):
             raise ReleaseError('Явно задайте made_for_kids по содержанию.')
         if len(m['title']) > 100 or len(m['description']) > 5000:
             raise ReleaseError('Превышен лимит заголовка или описания YouTube.')
+        if not m.get('youtube_id'):
+            from tools.publishing_youtube import release_plan, validate_plan
+            validate_plan(release_plan(m))
     for platform, key in [('telegram', 'telegram_text'), ('dzen', 'dzen_article')]:
         if platform in m['platforms'] and not m.get(key):
             raise ReleaseError('Подготовьте ' + key)
