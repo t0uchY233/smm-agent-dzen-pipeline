@@ -4,7 +4,7 @@
 
 ## Подключение
 
-Зависимости транспорта, включая `playwright` и `Pillow`: `python -m pip install -r requirements-publishing.txt`. Локальным BDD-тестам дополнительно нужны `requirements-testing.txt` и Chromium (`python -m playwright install chromium`).
+Зависимости транспорта, включая `playwright` и `Pillow`: `python -m pip install -r requirements-publishing.txt`.
 
 Windows: `start_chrome.bat` или `ensure_cdp_chrome.ps1`. Linux: `python tools/chrome_cdp.py` в рабочем столе либо с постоянным Xvfb DISPLAY. Войти в Дзен вручную в отдельном профиле. `CHROME_BINARY`, `DZEN_CDP_URL` и `DZEN_CHROME_PROFILE` настраивают окружение; канал выпуска берётся из manifest. `DZEN_CDP_MODE=external` запрещает локальный запуск Chrome и использует уже доступный loopback CDP, например через SSH-туннель. Запуск локального Chrome от root запрещён.
 
@@ -26,4 +26,4 @@ python tools/publish_release.py check-dzen --release <release-dir>
 
 Внутри транспорта сохранены `fill_article`, упорядоченная последовательность, Word rich paste и отложка. Старые самостоятельные CLI-параметры статьи, `--media`, `--sequence` и `--schedule` больше не выполняют внешние изменения без контракта выпуска: используйте поля `dzen_article`, `dzen_images`, `dzen_sequence_path` и `scheduled_at` manifest.
 
-Маршрут навыка: [публикация в Дзен](../docs/dzen-publication-route.md). Запуск идёт через общий CLI `tools/publish_release.py` (`prepare-dzen`, `schedule-dzen`, `check-dzen`). Проверки: [BDD](../tests/bdd/test_dzen.py), [наблюдение очереди и превью](../tests/bdd/test_dzen_observation.py), [CDP](../tools/test_chrome_cdp.py).
+Маршрут навыка: [публикация в Дзен](../docs/dzen-publication-route.md). Запуск идёт через общий CLI `tools/publish_release.py` (`prepare-dzen`, `schedule-dzen`, `check-dzen`). BDD-проверки, наблюдение очереди и тесты CDP находятся в ветке разработки `rework/publishing-solyanka`.

@@ -35,7 +35,5 @@ python tools/publish_release.py auth-telegram
 
 ## Разработка
 
-Тестовые зависимости — `requirements-testing.txt`; зависимости публикации, включая Playwright и Pillow, — `requirements-publishing.txt`. Для браузерных BDD-проверок отдельно нужен Chromium Playwright. Установка зависимостей и браузера не выполняется автоматически при публикации.
-
-Активные проверки находятся в `tools/` и `tests/bdd/`; `tools/test_skill_references.py` сверяет команды документов с argparse, пути и commit транспортов без сети. Все запуски тестов — только по политике хоста из `/root/.codex/AGENTS.md`, через предусмотренный ею guard. EVAL-набор решений агента: `.agents/skills/publish-from-script/evals/README.md`. Исторические интеграции и тесты сохранены в `archive/retired-2026-09-18/` и не входят в активный процесс.
+Это рабочая поставка без тестов, EVAL и инструментов разработки. Они находятся в ветке разработки `rework/publishing-solyanka` форка `t0uchY233/smm-agent-dzen-pipeline`; правки кода вносить там. Зависимости публикации, включая Playwright и Pillow, — `requirements-publishing.txt`.
 Инструкции: `AGENTS.md`, `RECIPE.md`, `.agents/skills/`, `.agents/commands/`. Источник контракта: `docs/specs/content-release.md`.
