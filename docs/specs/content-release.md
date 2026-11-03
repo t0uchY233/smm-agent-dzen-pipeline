@@ -58,7 +58,7 @@ YouTube использует validate/build_body/preview из `youtube-publish/y
 
 DOCX и MP4: `YYYY-MM-DD-HHMM-Русский заголовок` с разными расширениями. Источник текста — DOCX; готовый MP4 — из `.tmp/rendered/`. Явное время пользователя приоритетнее имени. Если оно не задано, Codex извлекает его через `read_docx.py`; CLI получает уже разрешённое значение. Если осталось меньше минуты, согласовать новую дату; никогда не подставлять прошедшее время в API.
 
-Каталог `.tmp/publishing/<docx-base>/` содержит `manifest.json`, `state.json`, `events.jsonl`, разрешённые тексты `telegram.txt`, `dzen.md`, браузерные доказательства. Этот каталог является рабочим журналом и не подлежит автоматической очистке. Проверить старый `.tmp/youtube/<docx-base>/upload-state.json`, `publish-log.md` и канал до новой загрузки.
+Каталог `.tmp/publishing/<docx-base>/` содержит `manifest.json`, `state.json`, `events.jsonl`, разрешённые тексты `.tmp/publishing/<docx-base>/telegram.txt` и `.tmp/publishing/<docx-base>/dzen.md`, браузерные доказательства. Этот каталог является рабочим журналом и не подлежит автоматической очистке. Проверить старый `.tmp/youtube/<docx-base>/upload-state.json`, `publish-log.md` и канал до новой загрузки.
 
 Минимальный manifest (пути относительно корня проекта; разрешены абсолютные локальные пути):
 
