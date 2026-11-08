@@ -255,12 +255,16 @@ class CDPTransport:
                 self.context = self.browser.contexts[0]
                 self.page = await self.new_page()
                 return self
-            except Exception:
+            except Exception as error:
                 if self.playwright:
                     await self.playwright.stop()
                     self.playwright = None
                 if attempt:
-                    raise
+                    # Raised before any editor page opens: no draft exists, retry is safe.
+                    reason = str(error) if isinstance(error, RuntimeError) else type(error).__name__
+                    raise core.ReleaseError(
+                        'Не удалось подключиться к Chrome Дзена. Закройте окно Chrome профиля Дзена '
+                        f'и повторите команду: черновик не создавался. Причина: {reason}') from error
         return self
 
     async def __aexit__(self, *exc):

@@ -17,10 +17,15 @@ async def telegram_action(action, release=None, part_index=None, message_id=None
     from tools.publishing_telegram import telegram_client, schedule_telegram, check_telegram, reconcile_telegram
     client = telegram_client()
     try:
-        if action == 'auth-telegram':
-            await client.start()
-            return {'authorized': True}
-        await client.connect()
+        try:
+            if action == 'auth-telegram':
+                await client.start()
+                return {'authorized': True}
+            await client.connect()
+        except (ConnectionError, OSError, asyncio.TimeoutError) as error:
+            # Nothing has been sent yet, so the user may safely retry after fixing the network.
+            raise ReleaseError('Нет соединения с Telegram. Проверьте, что VPN включён, '
+                               'и повторите команду: отправка не начиналась.') from error
         if action == 'reconcile-telegram':
             return await reconcile_telegram(release, client, part_index, message_id)
         if action == 'schedule-telegram':

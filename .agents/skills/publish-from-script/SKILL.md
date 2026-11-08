@@ -32,7 +32,7 @@ URL означает только сверку существующего рол
 4. `tools/publish_release.py prepare-dzen --release <dir>` → `tools/publish_release.py schedule-dzen --release <dir>`. Первый шаг уже создаёт внешний черновик и требует утверждения; это не локальное превью. Используй навык Дзена и его CDP-маршрут.
 5. Отдельными запусками выполни `tools/publish_release.py check-youtube --release <dir>`, `tools/publish_release.py check-telegram --release <dir>`, `tools/publish_release.py check-dzen --release <dir>` для соответствующих площадок. Возможности проверки фактического выхода Дзена ограничены — см. спецификацию.
 
-Происхождение транспортов: `youtube-publish/UPSTREAM.md`, `telegram-publish/UPSTREAM.md`, `dzen-publish/UPSTREAM.md`. Не запускай вендорные отправки в обход общего CLI. Studio/Browser/Computer Use — резерв только после наблюдаемого сбоя основного API/CDP, с проверкой существующего объекта. `tools/publish_release.py record-browser` записывает доказательство, но ничего не публикует и не заменяет наблюдение.
+Происхождение транспортов: `youtube-publish/UPSTREAM.md`, `telegram-publish/UPSTREAM.md`, `dzen-publish/UPSTREAM.md`. Не запускай вендорные отправки в обход общего CLI. Telegram и Дзен — только через CLI, без встроенного браузера Codex, Telegram Web и Computer Use (правило «Только CLI» в спецификации). Studio — резерв YouTube после наблюдаемого сбоя API, с проверкой существующего ролика. `tools/publish_release.py record-browser` записывает доказательство, но ничего не публикует и не заменяет наблюдение.
 
 ## Сбои и итог
 

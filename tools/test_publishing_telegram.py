@@ -154,3 +154,21 @@ def test_telegram_flood_wait_is_not_retried(release, monkeypatch, method, telegr
     send.assert_awaited_once()
     assert client.uploads == 1
     assert reopened.state['youtube']['id'] == 'video123'
+
+
+def test_telegram_connection_failure_asks_for_vpn_without_send_attempt(release, monkeypatch, capsys):
+    from tools.publish_release import main
+
+    class Offline:
+        async def connect(self):
+            raise ConnectionError('Connection to Telegram failed 5 time(s)')
+
+        async def disconnect(self):
+            pass
+
+    monkeypatch.setattr(tg, 'telegram_client', Offline)
+    assert main(['schedule-telegram', '--release', str(release.directory)]) == 1
+    assert 'VPN' in capsys.readouterr().err
+    state = core.Release(release.directory).state['telegram']
+    assert 'отправка не начиналась' in state['last_error']
+    assert not state.get('parts')

@@ -1,6 +1,6 @@
 # Подключение и восстановление CDP
 
-Пути указаны от корня репозитория. Отказ отдельного Browser-инструмента — ограничение этого инструмента, не доказательство недоступности Дзена. Основной путь остаётся `tools/publish_release.py` через `tools/publishing_dzen.py` и `dzen-publish/`.
+Пути указаны от корня репозитория. Единственный путь — `tools/publish_release.py` через `tools/publishing_dzen.py` и `dzen-publish/`; браузерный обход не используется (правило «Только CLI» в `docs/specs/content-release.md`).
 
 ## Предварительная проверка
 
@@ -47,4 +47,4 @@ python tools/chrome_cdp.py
 
 После успешного preflight основной маршрут утверждённой версии: `tools/publish_release.py prepare-dzen --release <dir>` → `tools/publish_release.py schedule-dzen --release <dir>` → отдельный `tools/publish_release.py check-dzen --release <dir>`.
 
-Browser Use/Computer Use — только доступный резерв после конкретного сбоя CDP, без нового черновика и слепой отправки. Если helper не восстановил соединение, перечисли наблюдаемую ошибку и доступность резерва, не называй это политикой Дзена. `tools/publish_release.py record-browser` лишь сохраняет доказательство; он не управляет браузером.
+Если helper не восстановил соединение, передай пользователю ошибку CLI и действие из неё; не переходи во встроенный браузер Codex и не называй это политикой Дзена. `tools/publish_release.py record-browser` лишь сохраняет доказательство; он не управляет браузером.

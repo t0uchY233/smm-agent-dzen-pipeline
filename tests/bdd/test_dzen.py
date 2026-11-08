@@ -448,3 +448,23 @@ def before_chrome(context):
     proc=context['process']
     assert proc.returncode==2
     assert 'Connecting' not in proc.stderr
+
+
+def test_cdp_connection_failure_is_actionable_before_any_draft(monkeypatch):
+    import tools.chrome_cdp as cdp
+    calls = []
+
+    def offline():
+        calls.append(1)
+        raise RuntimeError('Chrome not installed; set CHROME_BINARY or install Google Chrome.')
+
+    monkeypatch.setattr(cdp, 'endpoint', lambda: 'http://127.0.0.1:9222')
+    monkeypatch.setattr(cdp, 'ensure_chrome', offline)
+
+    async def enter():
+        async with dzen.CDPTransport():
+            pytest.fail('must not open the editor')
+
+    with pytest.raises(core.ReleaseError, match='черновик не создавался.*Chrome not installed'):
+        asyncio.run(enter())
+    assert len(calls) == 2  # bounded recovery, then a clear stop
