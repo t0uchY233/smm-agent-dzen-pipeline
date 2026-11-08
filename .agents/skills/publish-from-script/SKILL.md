@@ -29,10 +29,10 @@ URL означает только сверку существующего рол
 1. `tools/publish_release.py schedule-youtube --release <dir>` — только для новой загрузки. Сохрани ID, проверь обработку, обложку и расписание.
 2. `tools/publish_release.py render-texts --release <dir>` — подстановка полученного URL вместо плейсхолдера входит в утверждение.
 3. `tools/publish_release.py schedule-telegram --release <dir>` — пользовательская MTProto-сессия; проверь целевой канал и `TELEGRAM_ALLOWED_CHAT_IDS`. Не расширяй allowlist ради отправки. Слишком большое видео — блокер, не скрытая замена ссылкой.
-4. `tools/publish_release.py prepare-dzen --release <dir>` → `tools/publish_release.py schedule-dzen --release <dir>`. Первый шаг уже создаёт внешний черновик и требует утверждения; это не локальное превью. Используй навык Дзена и его CDP-маршрут.
-5. Отдельными запусками выполни `tools/publish_release.py check-youtube --release <dir>`, `tools/publish_release.py check-telegram --release <dir>`, `tools/publish_release.py check-dzen --release <dir>` для соответствующих площадок. Возможности проверки фактического выхода Дзена ограничены — см. спецификацию.
+4. Дзен — во встроенном браузере Codex по навыку `dzen` (правило «Дзен в браузере Codex» в `docs/specs/content-release.md`), затем `tools/publish_release.py record-browser --release <dir> --platform dzen --evidence <json>`.
+5. Отдельными запусками выполни `tools/publish_release.py check-youtube --release <dir>`, `tools/publish_release.py check-telegram --release <dir>` для соответствующих площадок. Дзен проверяется в очереди браузера перед record-browser.
 
-Происхождение транспортов: `youtube-publish/UPSTREAM.md`, `telegram-publish/UPSTREAM.md`, `dzen-publish/UPSTREAM.md`. Не запускай вендорные отправки в обход общего CLI. Telegram и Дзен — только через CLI, без встроенного браузера Codex, Telegram Web и Computer Use (правило «Только CLI» в спецификации). Studio — резерв YouTube после наблюдаемого сбоя API, с проверкой существующего ролика. `tools/publish_release.py record-browser` записывает доказательство, но ничего не публикует и не заменяет наблюдение.
+Происхождение транспортов: `youtube-publish/UPSTREAM.md`, `telegram-publish/UPSTREAM.md`, `dzen-publish/UPSTREAM.md`. Не запускай вендорные отправки в обход общего CLI. Telegram — только через API, без Telegram Web; Дзен — во встроенном браузере Codex (правила в спецификации). Studio — резерв YouTube после наблюдаемого сбоя API, с проверкой существующего ролика. `tools/publish_release.py record-browser` записывает доказательство, но ничего не публикует и не заменяет наблюдение.
 
 ## Сбои и итог
 

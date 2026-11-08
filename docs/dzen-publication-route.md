@@ -1,6 +1,6 @@
 # Маршрут публикации в Дзен
 
-Контракт выпуска: `docs/specs/content-release.md`. Исполняющий навык: `.agents/skills/dzen/SKILL.md`. Основной путь — общий CLI `tools/publish_release.py`, адаптер `tools/publishing_dzen.py` и Playwright/CDP-транспорт `dzen-publish/`. Происхождение и лицензионное ограничение: `dzen-publish/UPSTREAM.md`.
+Контракт выпуска: `docs/specs/content-release.md`. Исполняющий навык: `.agents/skills/dzen/SKILL.md`. В Codex — встроенный браузер Codex (правило «Дзен в браузере Codex» в `docs/specs/content-release.md`). Вне Codex — общий CLI `tools/publish_release.py`, адаптер `tools/publishing_dzen.py` и Playwright/CDP-транспорт `dzen-publish/`. Происхождение и лицензионное ограничение: `dzen-publish/UPSTREAM.md`.
 
 ## До утверждения: только локальный комплект
 
@@ -10,7 +10,7 @@
 4. Завершить статью ровно одним блоком из `.agents/skills/dzen/references/required-footer.md`. Он входит в утверждаемую версию; проверить пять активных ссылок в предпросмотре редактора перед отправкой. Изображения `.png`, `.jpg`, `.jpeg`, `.bmp`, `.webp`, `.gif` должны существовать и открываться локально.
 5. Выполнить `tools/publish_release.py prepare --manifest <json>` и `tools/publish_release.py status --release <dir>`. Показать материалы, файлы, канал, московскую дату и revision. После OK именно этой версии — `tools/publish_release.py approve --release <dir> --revision <hash>`. Уже утверждённую неизменную версию не пересогласовывать.
 
-## После утверждения: черновик и назначение
+## После утверждения вне Codex: черновик и назначение
 
 Подключение описано в `.agents/skills/dzen/references/cdp-recovery.md`: Linux использует `tools/chrome_cdp.py`, Windows — `dzen-publish/ensure_cdp_chrome.ps1`. Режим `DZEN_CDP_MODE=external` использует существующий loopback CDP без локального запуска Chrome. Локальный Chrome от root запрещён. Авторизация хранится в выбранном профиле; cookies и токены не передаются через чат.
 
@@ -36,6 +36,6 @@ check-dzen запускается отдельно и требует неизм
 
 При ошибке инструмента или неопределённом результате остановить внешние изменения: status/check-dzen, сверка существующего объекта и точный блокер. Не очищать `draft_attempted`, `attempted`, ID или журнал. При неизвестном draft_url нет отдельной команды привязки — найти объект и сообщить ограничение, не создавать дубль. Первый таймаут подключения сам по себе не означает `failed`.
 
-Браузерный обход не используется (правило «Только CLI» в `docs/specs/content-release.md`). `tools/publish_release.py record-browser --release <dir> --platform dzen --evidence <json>` сохраняет наблюдение, но не публикует и не делает его автоматически достоверным. Если сверка или авторизация недоступны, сохранить комплект и сообщить блокер. Успехи других площадок не стирать.
+В Codex результат фиксирует `tools/publish_release.py record-browser --release <dir> --platform dzen --evidence <json>` сохраняет наблюдение, но не публикует и не делает его автоматически достоверным. Если сверка или авторизация недоступны, сохранить комплект и сообщить блокер. Успехи других площадок не стирать.
 
 Общий CLI пока не поддерживает немедленный выпуск, перенос/отмену расписания и привязку потерянного черновика. Не заменять эти запросы другой операцией без согласования.
