@@ -4,7 +4,7 @@
 
 ## Архитектура
 Локальный агентный пайплайн выпуска видео Сергея Веселкова (Python 3, FFmpeg, Playwright). Сервера нет: всё запускает агент (Codex/Claude/Pi) из CLI и навыков `.agents/skills/`.
-- **Core (не трогаем в этой переработке):** `tone-of-voice.md` → навык `video-script` (+ `ru-text`, `slop-stop-main`) → DOCX в `.tmp/teleprompter/` (`tools/create_marketing_script.py`, `tools/read_docx.py`) → запись raw-видео пользователем → монтаж `render-docx-visuals` / `render-with-visuals` (`tools/render_video_visuals.py`, Whisper large-v3, FFmpeg) → MP4 в `.tmp/rendered/`.
+- **Core (не трогаем в этой переработке):** `tone-of-voice.md` → навык `video-script` (+ `ru-text`, `slop-stop-main`) → DOCX в `.tmp/teleprompter/` (`tools/read_docx.py`) → запись raw-видео пользователем → монтаж `render-docx-visuals` / `render-with-visuals` (`tools/render_video_visuals.py`, Whisper large-v3, FFmpeg) → MP4 в `.tmp/rendered/`.
 - **Публикационный слой (пересобираем):** `tools/publish_release.py` (CLI) → `tools/publishing_core.py` (manifest, revision, approval, state, lock) → адаптеры `tools/publishing_youtube.py` (Google API, OAuth), `tools/publishing_telegram.py` (Telethon, пользовательская сессия), Дзен через `dzen-publish/publish_dzen.py` (Playwright/CDP, вендор Andrrreyiv/dzen-publish). Навыки: `publish-from-script`, `dzen`, `smm-conductor`.
 - Состояние выпусков: `.tmp/publishing/{docx-base}/` (manifest.json, state.json, events.jsonl), журнал `publish-log.md`.
 - Тесты: `tools/test_*.py` (pytest, `pytest.ini`: testpaths=tools).
