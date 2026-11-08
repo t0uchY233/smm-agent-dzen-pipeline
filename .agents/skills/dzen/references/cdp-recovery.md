@@ -1,6 +1,6 @@
 # Подключение и восстановление CDP
 
-Пути указаны от корня репозитория. Это путь вне Codex: `tools/publish_release.py` через `tools/publishing_dzen.py` и `dzen-publish/`. В Codex Дзен публикуется во встроенном браузере (правило «Дзен в браузере Codex» в `docs/specs/content-release.md`).
+Пути указаны от корня репозитория. Это путь вне Codex: `tools/publish_release.py` через `tools/publishing_dzen.py` и `dzen-publish/`. В Codex Дзен публикуется во встроенном браузере (правило «Публикация в браузере Codex» в `docs/specs/content-release.md`).
 
 ## Предварительная проверка
 

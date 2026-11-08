@@ -44,7 +44,8 @@ def record_browser(release, platform, evidence):
     from tools.publishing_core import local_path, scheduled_time
     from urllib.parse import urlparse
     host = urlparse(evidence['url']).hostname
-    allowed = ('dzen.ru',) if platform == 'dzen' else ('youtube.com', 'www.youtube.com', 'studio.youtube.com')
+    allowed = {'dzen': ('dzen.ru',), 'telegram': ('web.telegram.org',),
+               'youtube': ('youtube.com', 'www.youtube.com', 'studio.youtube.com')}[platform]
     if host not in allowed:
         raise ReleaseError('Неверный домен доказательства публикации.')
     if evidence['channel'] != release.manifest[platform + '_channel']:
@@ -88,7 +89,7 @@ def main(argv=None):
     p.add_argument('--message-id', type=int, required=True)
     p = sub.add_parser('record-browser')
     p.add_argument('--release', required=True)
-    p.add_argument('--platform', choices=('youtube', 'dzen'), required=True)
+    p.add_argument('--platform', choices=('youtube', 'telegram', 'dzen'), required=True)
     p.add_argument('--evidence', required=True)
     args = parser.parse_args(argv)
     try:

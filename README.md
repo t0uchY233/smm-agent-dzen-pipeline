@@ -5,13 +5,15 @@ Codex создаёт сценарий и визуалы, монтирует за
 1. `/video-script`: тема и время → сводка → OK → DOCX.
 2. Пользователь записывает raw-видео.
 3. `/render-docx-visuals "<raw_mp4>" --docx "<docx_path>"`: монтаж и проверка.
-4. `/publish-from-script "<rendered_mp4>" --docx "<docx_path>"`: общее превью → OK → серверная отложка.
+4. `/publish-from-script "<rendered_mp4>" --docx "<docx_path>"`: общее превью → OK → отложка во встроенном браузере Codex (YouTube Studio, Telegram Web, Дзен).
 
 DOCX и MP4 имеют одинаковый base-name `YYYY-MM-DD-HHMM-Русский заголовок`. Время — Москва. Явный запрос одной площадки ограничивает выпуск ею. Существующий YouTube URL не вызывает повторную загрузку.
 
 Готовое видео: `.tmp/rendered/YYYY-MM-DD-HHMM-Русский заголовок.mp4`. Для старых сценариев без встроенных изображений доступен резервный `render-with-visuals`; основной способ — `render-docx-visuals`.
 
 ## Настройка
+
+В Codex входы не нужны: используются сессии встроенного браузера Codex. Команды ниже — для пути вне Codex.
 
 ```text
 python -m pip install -r requirements-publishing.txt
@@ -26,7 +28,7 @@ python tools/publish_release.py auth-telegram
 
 Состояние — `.tmp/publishing/<docx-base>/`; не очищайте его до сверки результатов. CLI проверяет утверждённую версию, каналы и сроки, блокирует слепой повтор после таймаута. При наблюдаемом сбое YouTube API используется Studio с проверкой существующего ролика; record-browser только сохраняет доказательство. При ошибке инструмента или неизвестном результате — сверка и блокер, не слепой повтор.
 
-Маршрут общего CLI: prepare → status и preview-youtube (новая загрузка) → показ комплекта → утверждение revision → approve → schedule-youtube → render-texts → schedule-telegram → Дзен во встроенном браузере Codex и record-browser → check-youtube, check-telegram. Выполняются только выбранные площадки. Существующий URL YouTube разрешает только сверку, не изменение ролика.
+Маршрут: prepare → status и preview-youtube (новая загрузка) → показ комплекта → утверждение revision → approve → в Codex YouTube Studio → render-texts → Telegram Web → Дзен во встроенном браузере с record-browser после каждой площадки (вне Codex — schedule-* и check-*). Выполняются только выбранные площадки. Существующий URL YouTube разрешает только сверку, не изменение ролика.
 
 В Codex Дзен публикуется во встроенном браузере Codex с порядком изображений DOCX из `dzen_sequence_path`; вне Codex — адаптер общего CLI и транспорт `dzen-publish/`. Маршрут: `docs/dzen-publication-route.md`. Текущая проверка CDP подтверждает будущую очередь, но не полноценный публичный выход после срока; исчезновение из очереди не означает успех. Немедленный выпуск, перенос/отмена расписания и private-only загрузка без будущей даты общим CLI пока не поддерживаются.
 

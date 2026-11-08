@@ -109,6 +109,8 @@ async def schedule_telegram(release, client):
     config = await client(GetConfigRequest())
     chunks = telegram_parts(text, url, config.caption_length_max, config.message_length_max)
     state = release.state.setdefault('telegram', {})
+    if state.get('confirmation') == 'browser':
+        raise ReleaseError('Telegram уже назначен через браузер Codex: только сверка в канале, повторная отправка запрещена.')
     parts = state.setdefault('parts', [])
     if state.get('channel_id') and state['channel_id'] != channel_id:
         raise ReleaseError('Изменился Telegram-канал. Нужна ручная сверка старой отложки.')

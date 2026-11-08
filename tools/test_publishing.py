@@ -458,3 +458,28 @@ def test_changed_web_client_requires_new_login(tmp_path, monkeypatch):
                         lambda *a: NS(client_id='old-client', client_secret='old-secret'))
     with pytest.raises(core.ReleaseError, match='изменился'):
         yt.youtube_service()
+
+
+def test_browser_evidence_for_telegram_blocks_api_resend(release, tmp_path):
+    link_youtube(release)
+    evidence = tmp_path / 'tg.png'
+    evidence.write_bytes(b'png')
+    data = dict(url='https://web.telegram.org/a/#-100123', channel=release.manifest['telegram_channel'],
+                status='scheduled', observed_at=datetime.now(timezone.utc).isoformat(),
+                evidence_path=str(evidence), scheduled_at=release.manifest['scheduled_at'])
+    record_browser(release, 'telegram', data)
+    assert release.state['telegram']['confirmation'] == 'browser'
+    client = FakeTelegram()
+    with pytest.raises(core.ReleaseError, match='через браузер'):
+        asyncio.run(tg.schedule_telegram(release, client))
+    assert not client.queue
+
+
+def test_browser_evidence_for_telegram_rejects_foreign_domain(release, tmp_path):
+    evidence = tmp_path / 'tg.png'
+    evidence.write_bytes(b'png')
+    data = dict(url='https://t.me/channel', channel=release.manifest['telegram_channel'],
+                status='scheduled', observed_at=datetime.now(timezone.utc).isoformat(),
+                evidence_path=str(evidence), scheduled_at=release.manifest['scheduled_at'])
+    with pytest.raises(core.ReleaseError, match='домен'):
+        record_browser(release, 'telegram', data)

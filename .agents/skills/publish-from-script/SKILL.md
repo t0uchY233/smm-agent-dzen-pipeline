@@ -1,6 +1,6 @@
 ---
 name: publish-from-script
-description: Подготовить DOCX-выпуск YouTube, Telegram и Дзена, после утверждения версии назначить публикации через общий CLI и отдельно проверить результат. Существующий YouTube URL использовать без повторной загрузки.
+description: Подготовить DOCX-выпуск YouTube, Telegram и Дзена, после утверждения версии назначить публикации во встроенном браузере Codex и зафиксировать результат. Существующий YouTube URL использовать без повторной загрузки.
 ---
 
 # Выпуск по сценарию
@@ -24,20 +24,14 @@ URL означает только сверку существующего рол
 
 ## Утверждённый выпуск
 
-Выполняй только шаги выбранных площадок:
+В Codex выполняй правило «Публикация в браузере Codex» в `docs/specs/content-release.md`: YouTube Studio → `tools/publish_release.py render-texts --release <dir>` → Telegram Web → Дзен (навык `dzen`), все во встроенном браузере Codex, после каждой площадки `tools/publish_release.py record-browser --release <dir> --platform <youtube|telegram|dzen> --evidence <json>`. Только выбранные площадки. Вне Codex: `schedule-youtube` → `render-texts` → `schedule-telegram` → `prepare-dzen` → `schedule-dzen`, затем отдельные `check-*`.
 
-1. `tools/publish_release.py schedule-youtube --release <dir>` — только для новой загрузки. Сохрани ID, проверь обработку, обложку и расписание.
-2. `tools/publish_release.py render-texts --release <dir>` — подстановка полученного URL вместо плейсхолдера входит в утверждение.
-3. `tools/publish_release.py schedule-telegram --release <dir>` — пользовательская MTProto-сессия; проверь целевой канал и `TELEGRAM_ALLOWED_CHAT_IDS`. Не расширяй allowlist ради отправки. Слишком большое видео — блокер, не скрытая замена ссылкой.
-4. Дзен — во встроенном браузере Codex по навыку `dzen` (правило «Дзен в браузере Codex» в `docs/specs/content-release.md`), затем `tools/publish_release.py record-browser --release <dir> --platform dzen --evidence <json>`.
-5. Отдельными запусками выполни `tools/publish_release.py check-youtube --release <dir>`, `tools/publish_release.py check-telegram --release <dir>` для соответствующих площадок. Дзен проверяется в очереди браузера перед record-browser.
-
-Происхождение транспортов: `youtube-publish/UPSTREAM.md`, `telegram-publish/UPSTREAM.md`, `dzen-publish/UPSTREAM.md`. Не запускай вендорные отправки в обход общего CLI. Telegram — только через API, без Telegram Web; Дзен — во встроенном браузере Codex (правила в спецификации). Studio — резерв YouTube после наблюдаемого сбоя API, с проверкой существующего ролика. `tools/publish_release.py record-browser` записывает доказательство, но ничего не публикует и не заменяет наблюдение.
+Происхождение транспортов: `youtube-publish/UPSTREAM.md`, `telegram-publish/UPSTREAM.md`, `dzen-publish/UPSTREAM.md`. Не запускай вендорные отправки в обход общего CLI. `tools/publish_release.py record-browser` записывает доказательство, но ничего не публикует и не заменяет наблюдение.
 
 ## Сбои и итог
 
 При неопределённом результате или ошибке инструмента останови внешние изменения: сначала `status`, соответствующий `check-*` и сверка существующего объекта, затем сообщи точный блокер. Не повторяй отправку вслепую, в том числе после FloodWait; не сбрасывай ID, attempted, журнал или `.lock` ради повтора. Если сверка недоступна, результат остаётся неподтверждённым. Успех одной площадки не стирается из-за сбоя другой. Запас времени повторно проверяется после длительной загрузки.
 
-Нет авторизации — сохрани локальный комплект и укажи, какой вход нужен. Пользователь проходит OAuth/Telegram-вход/Дзен локально; коды, пароли, cookies и токены не запрашивай в чате и не выводи `.env`.
+Нет входа на сайте — сохрани локальный комплект и попроси войти во встроенном браузере Codex; коды, пароли, cookies и токены не запрашивай в чате и не выводи `.env`.
 
 Выдай URL/ID, подтверждённое время МСК и статус либо блокер отдельно по площадкам. Будущая отложка — «Запланировано», не «Опубликовано». Исчезновение из очереди не доказывает выход; нужна отдельная сверка после срока. Постоянного монитора нет; подтверждённые серверные расписания не требуют включённого компьютера.

@@ -5,7 +5,7 @@ description: Подготовить, назначить или проверит�
 
 # Публикация в Дзен
 
-Прочитай `docs/dzen-publication-route.md` и `docs/specs/content-release.md`. Пути здесь — от корня репозитория. В Codex Дзен публикуется во встроенном браузере Codex (правило «Дзен в браузере Codex» в `docs/specs/content-release.md`). Вне Codex — транспорт `dzen-publish/`, происхождение и ограничение лицензии описаны в `dzen-publish/UPSTREAM.md`. Пользуйся проектным Python, не самостоятельными командами отправки вендора.
+Прочитай `docs/dzen-publication-route.md` и `docs/specs/content-release.md`. Пути здесь — от корня репозитория. В Codex Дзен публикуется во встроенном браузере Codex (правило «Публикация в браузере Codex» в `docs/specs/content-release.md`). Вне Codex — транспорт `dzen-publish/`, происхождение и ограничение лицензии описаны в `dzen-publish/UPSTREAM.md`. Пользуйся проектным Python, не самостоятельными командами отправки вендора.
 
 ## Маршрут
 

@@ -1,6 +1,6 @@
 # Маршрут публикации в Дзен
 
-Контракт выпуска: `docs/specs/content-release.md`. Исполняющий навык: `.agents/skills/dzen/SKILL.md`. В Codex — встроенный браузер Codex (правило «Дзен в браузере Codex» в `docs/specs/content-release.md`). Вне Codex — общий CLI `tools/publish_release.py`, адаптер `tools/publishing_dzen.py` и Playwright/CDP-транспорт `dzen-publish/`. Происхождение и лицензионное ограничение: `dzen-publish/UPSTREAM.md`.
+Контракт выпуска: `docs/specs/content-release.md`. Исполняющий навык: `.agents/skills/dzen/SKILL.md`. В Codex — встроенный браузер Codex (правило «Публикация в браузере Codex» в `docs/specs/content-release.md`). Вне Codex — общий CLI `tools/publish_release.py`, адаптер `tools/publishing_dzen.py` и Playwright/CDP-транспорт `dzen-publish/`. Происхождение и лицензионное ограничение: `dzen-publish/UPSTREAM.md`.
 
 ## До утверждения: только локальный комплект
 
